@@ -1,0 +1,14 @@
+{
+  "name": "project-management-system",
+  "version": "1.0.0",
+  "description": "Project Management System with separated frontend and backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:frontend": "npm install --prefix frontend",
+    "install:backend": "npm install --prefix backend",
+    "install-all": "npm install && npm run install:frontend && npm run install:backend",
+    "seed:backend": "npm run seed --prefix backend",
+    "dev": "node run-dev.js"
+  }
+}

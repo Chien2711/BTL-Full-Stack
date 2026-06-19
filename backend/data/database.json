@@ -1,0 +1,69 @@
+{
+  "users": [
+    {
+      "id": "u0",
+      "fullName": "Quản trị viên",
+      "avatarUrl": "https://ui-avatars.com/api/?name=Admin&background=4f46e5&color=fff",
+      "role": "Admin",
+      "isOnline": false,
+      "email": "admin@projecthub.com",
+      "password": "admin123"
+    },
+    {
+      "id": "u2",
+      "fullName": "Ngọc Bảo",
+      "avatarUrl": "https://ui-avatars.com/api/?name=Ngoc+Bao&background=0ea5e9&color=fff",
+      "role": "Admin",
+      "isOnline": false,
+      "email": "ngocbao@projecthub.com",
+      "password": "123456"
+    },
+    {
+      "id": "u10",
+      "fullName": "Nguyễn Văn A",
+      "avatarUrl": "https://ui-avatars.com/api/?name=Nguyen+Van+A&background=10b981&color=fff",
+      "role": "Backend Dev",
+      "isOnline": false,
+      "email": "nhanvien1@projecthub.com",
+      "password": "123456"
+    },
+    {
+      "id": "u11",
+      "fullName": "Trần Thị B",
+      "avatarUrl": "https://ui-avatars.com/api/?name=Tran+Thi+B&background=6366f1&color=fff",
+      "role": "Frontend Lead",
+      "isOnline": false,
+      "email": "nhanvien2@projecthub.com",
+      "password": "123456"
+    },
+    {
+      "id": "u12",
+      "fullName": "Lê Văn C",
+      "avatarUrl": "https://ui-avatars.com/api/?name=Le+Van+C&background=ec4899&color=fff",
+      "role": "UI/UX Designer",
+      "isOnline": false,
+      "email": "nhanvien3@projecthub.com",
+      "password": "123456"
+    },
+    {
+      "id": "u13",
+      "fullName": "Phạm Thị D",
+      "avatarUrl": "https://ui-avatars.com/api/?name=Pham+Thi+D&background=f59e0b&color=fff",
+      "role": "QA Engineer",
+      "isOnline": false,
+      "email": "nhanvien4@projecthub.com",
+      "password": "123456"
+    },
+    {
+      "id": "u14",
+      "fullName": "Hoàng Văn E",
+      "avatarUrl": "https://ui-avatars.com/api/?name=Hoang+Van+E&background=8b5cf6&color=fff",
+      "role": "Business Analyst",
+      "isOnline": false,
+      "email": "nhanvien5@projecthub.com",
+      "password": "123456"
+    }
+  ],
+  "projects": [],
+  "tasks": []
+}
