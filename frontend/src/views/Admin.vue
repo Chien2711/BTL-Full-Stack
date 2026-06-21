@@ -408,13 +408,13 @@ const quickSelectedMemberId = ref('');
 const isCreateProjectModalOpen = ref(false);
 
 // Create Project fields
-const newProject = ref({
+const newProject = ref<Omit<Project, 'id' | 'createdAt' | 'progress'>>({
   name: '',
   description: '',
   color: 'indigo',
   status: 'New',
   statusText: 'Lên kế hoạch',
-  members: [] as any[]
+  members: []
 });
 
 // Access Protection on Mount

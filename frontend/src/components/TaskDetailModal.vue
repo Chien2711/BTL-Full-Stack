@@ -418,9 +418,57 @@
                 <div class="flex-1 space-y-1">
                   <div class="flex items-center justify-between">
                     <span class="text-xs font-bold text-slate-800">{{ comment.userName }}</span>
-                    <span class="text-[10px] text-slate-400">{{ formatCommentDate(comment.createdAt) }}</span>
+                    <div class="flex items-center space-x-2">
+                      <span class="text-[10px] text-slate-400">
+                        {{ formatCommentDate(comment.updatedAt || comment.createdAt) }}
+                        <span v-if="comment.updatedAt">(đã sửa)</span>
+                      </span>
+                      <div v-if="canManageComment(comment)" class="flex items-center space-x-0.5">
+                        <button
+                          v-if="editingCommentId !== comment.id"
+                          type="button"
+                          @click="startEditComment(comment)"
+                          class="p-1 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-md transition-colors"
+                          title="Sửa bình luận"
+                        >
+                          <Pencil class="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          @click="removeComment(comment.id)"
+                          class="p-1 text-slate-400 hover:text-rose-600 hover:bg-white rounded-md transition-colors"
+                          title="Xóa bình luận"
+                        >
+                          <Trash2 class="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <p class="text-xs text-slate-600 leading-relaxed">{{ comment.content }}</p>
+                  <div v-if="editingCommentId === comment.id" class="space-y-2">
+                    <textarea
+                      v-model="editingCommentText"
+                      rows="2"
+                      class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-700 focus:outline-none focus:border-indigo-500 resize-none"
+                    ></textarea>
+                    <div class="flex justify-end space-x-2">
+                      <button
+                        type="button"
+                        @click="cancelEditComment"
+                        class="px-2.5 py-1.5 text-[10px] font-bold text-slate-500 hover:text-slate-700 hover:bg-white rounded-lg transition-colors"
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        type="button"
+                        @click="saveComment(comment.id)"
+                        class="px-2.5 py-1.5 text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors flex items-center space-x-1"
+                      >
+                        <Check class="w-3 h-3" />
+                        <span>Lưu</span>
+                      </button>
+                    </div>
+                  </div>
+                  <p v-else class="text-xs text-slate-600 leading-relaxed break-words">{{ comment.content }}</p>
                 </div>
               </div>
             </div>
@@ -489,7 +537,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
-import { X, MessageSquare, Send, Trash2, CheckSquare, Clock, Plus } from '@lucide/vue';
+import { X, MessageSquare, Send, Trash2, CheckSquare, Clock, Plus, Pencil, Check } from '@lucide/vue';
 import { useTaskStore } from '../stores/taskStore';
 
 // Sóng nước ripple cho các nút bấm trong modal chi tiết
@@ -513,7 +561,7 @@ function handleButtonClick(event: MouseEvent) {
 
   el.appendChild(circle);
 }
-import type { Task } from '../services/mockData';
+import type { Task, Comment } from '../services/mockData';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -541,6 +589,8 @@ const newCommentText = ref('');
 const newSubTaskTitle = ref('');
 const newLogHours = ref<number | null>(null);
 const newLogDescription = ref('');
+const editingCommentId = ref<string | null>(null);
+const editingCommentText = ref('');
 
 // Available Labels config
 const availableLabels = [
@@ -571,6 +621,9 @@ function loadTaskData() {
     newSubTaskTitle.value = '';
     newLogHours.value = null;
     newLogDescription.value = '';
+    editingCommentId.value = null;
+    editingCommentText.value = '';
+    void taskStore.refreshTaskComments(task.id);
   }
 }
 
@@ -708,10 +761,41 @@ function submitWorkLog() {
 }
 
 // Comments actions
-function submitComment() {
+async function submitComment() {
   if (localTask.value && newCommentText.value.trim()) {
-    taskStore.addComment(localTask.value.id, newCommentText.value.trim());
+    await taskStore.addComment(localTask.value.id, newCommentText.value.trim());
     newCommentText.value = '';
+  }
+}
+
+function canManageComment(comment: Comment) {
+  if (isManager.value) return true;
+  const currentUser = taskStore.currentUser;
+  return comment.userId === currentUser.id || (!comment.userId && comment.userName === currentUser.fullName);
+}
+
+function startEditComment(comment: Comment) {
+  editingCommentId.value = comment.id;
+  editingCommentText.value = comment.content;
+}
+
+function cancelEditComment() {
+  editingCommentId.value = null;
+  editingCommentText.value = '';
+}
+
+async function saveComment(commentId: string) {
+  if (!localTask.value || !editingCommentText.value.trim()) return;
+  await taskStore.updateComment(localTask.value.id, commentId, editingCommentText.value.trim());
+  cancelEditComment();
+}
+
+async function removeComment(commentId: string) {
+  if (!localTask.value) return;
+  if (!confirm('Bạn có chắc chắn muốn xóa bình luận này?')) return;
+  await taskStore.deleteComment(localTask.value.id, commentId);
+  if (editingCommentId.value === commentId) {
+    cancelEditComment();
   }
 }
 

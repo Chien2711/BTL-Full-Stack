@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="ApiGateway/ApiGateway.csproj" />
+  <Project Path="NotifyService/NotifyService.csproj" />
+  <Project Path="ProjectService/ProjectService.csproj" />
+  <Project Path="TaskService/TaskService.csproj" />
+</Solution>

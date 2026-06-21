@@ -47,6 +47,125 @@ function isViewerRole(user) {
   return user && user.role === 'Viewer';
 }
 
+function getNowIso() {
+  return new Date().toISOString();
+}
+
+function parseUserIds(value) {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map(id => id.trim())
+    .filter(Boolean);
+}
+
+function uniqueIds(ids) {
+  return [...new Set(ids.filter(Boolean))];
+}
+
+function canInteractWithTask(user, task) {
+  if (!user || !task) return false;
+  if (isManagerRole(user)) return true;
+  const assignees = parseUserIds(task.assigneeId);
+  return assignees.includes(user.id) || task.creatorId === user.id;
+}
+
+function mapComment(comment) {
+  return {
+    id: comment.id,
+    taskId: comment.taskId,
+    userId: comment.userId,
+    userName: comment.userName,
+    userAvatar: comment.userAvatar,
+    content: comment.content,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt
+  };
+}
+
+function mapNotification(notification) {
+  return {
+    ...notification,
+    isRead: !!notification.isRead
+  };
+}
+
+async function writeActivityLog({ user, action, entityType, entityId, taskId, message }) {
+  const id = 'act_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  await db.query(`
+    INSERT INTO ActivityLogs (id, userId, userName, action, entityType, entityId, taskId, message, createdAt)
+    VALUES (@id, @userId, @userName, @action, @entityType, @entityId, @taskId, @message, @createdAt)
+  `, {
+    id,
+    userId: user?.id || null,
+    userName: user?.fullName || null,
+    action,
+    entityType,
+    entityId,
+    taskId,
+    message,
+    createdAt: getNowIso()
+  });
+}
+
+async function createNotification({ userId, title, message, type, taskId = null, projectId = null, actor = null }) {
+  if (!userId) return null;
+
+  const id = 'noti_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  const createdAt = getNowIso();
+
+  await db.query(`
+    INSERT INTO Notifications (id, userId, title, message, type, taskId, projectId, actorId, actorName, isRead, createdAt)
+    VALUES (@id, @userId, @title, @message, @type, @taskId, @projectId, @actorId, @actorName, 0, @createdAt)
+  `, {
+    id,
+    userId,
+    title,
+    message,
+    type,
+    taskId,
+    projectId,
+    actorId: actor?.id || null,
+    actorName: actor?.fullName || null,
+    createdAt
+  });
+
+  return mapNotification({
+    id,
+    userId,
+    title,
+    message,
+    type,
+    taskId,
+    projectId,
+    actorId: actor?.id || null,
+    actorName: actor?.fullName || null,
+    isRead: false,
+    createdAt
+  });
+}
+
+async function createNotificationsForUsers(userIds, payload, actor = null, excludeActor = true) {
+  const recipients = uniqueIds(userIds).filter(userId => !excludeActor || userId !== actor?.id);
+  const notifications = [];
+
+  for (const userId of recipients) {
+    const notification = await createNotification({ userId, ...payload, actor });
+    if (notification) notifications.push(notification);
+  }
+
+  return notifications;
+}
+
+async function notifyTaskParticipants(task, actor, payload) {
+  const recipients = uniqueIds([
+    ...parseUserIds(task.assigneeId),
+    task.creatorId
+  ]);
+
+  return createNotificationsForUsers(recipients, payload, actor);
+}
+
 // --- API ENDPOINTS ---
 
 // 1. Auth APIs
@@ -269,10 +388,13 @@ app.get('/api/tasks', async (req, res) => {
       if (!commentsByTask[c.taskId]) commentsByTask[c.taskId] = [];
       commentsByTask[c.taskId].push({
         id: c.id,
+        taskId: c.taskId,
+        userId: c.userId,
         userName: c.userName,
         userAvatar: c.userAvatar,
         content: c.content,
-        createdAt: c.createdAt
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt
       });
     });
 
@@ -302,18 +424,40 @@ app.post('/api/tasks', async (req, res) => {
     const id = 't_' + Date.now();
     const createdAt = new Date().toISOString().split('T')[0];
     const labelsStr = Array.isArray(labels) ? labels.join(',') : (labels || '');
+    const finalCreatorId = creatorId || user.id;
 
     await db.query(`
       INSERT INTO Tasks (id, title, description, status, priority, dueDate, projectId, assigneeId, creatorId, createdAt, labels, estimatedHours, loggedHours)
       VALUES (@id, @title, @description, @status, @priority, @dueDate, @projectId, @assigneeId, @creatorId, @createdAt, @labelsStr, @estimatedHours, 0)
     `, {
-      id, title, description, status, priority, dueDate, projectId, assigneeId, creatorId, createdAt, labelsStr, estimatedHours: estimatedHours || 0
+      id, title, description, status, priority, dueDate, projectId, assigneeId, creatorId: finalCreatorId, createdAt, labelsStr, estimatedHours: estimatedHours || 0
     });
 
-    res.status(201).json({
-      id, title, description, status, priority, dueDate, projectId, assigneeId, creatorId, createdAt,
+    const createdTask = {
+      id, title, description, status, priority, dueDate, projectId, assigneeId, creatorId: finalCreatorId, createdAt,
       labels: labels || [], estimatedHours: estimatedHours || 0, loggedHours: 0, subTasks: [], workLogs: [], comments: []
+    };
+
+    await writeActivityLog({
+      user,
+      action: 'task.created',
+      entityType: 'task',
+      entityId: id,
+      taskId: id,
+      message: `${user.fullName} đã tạo công việc "${title}"`
     });
+
+    if (assigneeId) {
+      await createNotificationsForUsers(parseUserIds(assigneeId), {
+        title: 'Bạn được giao công việc',
+        message: `${user.fullName} đã giao công việc "${title}" cho bạn.`,
+        type: 'task.assigned',
+        taskId: id,
+        projectId
+      }, user);
+    }
+
+    res.status(201).json(createdTask);
   } catch (err) {
     console.error('Create task error:', err);
     res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
@@ -334,6 +478,7 @@ app.put('/api/tasks/:id', async (req, res) => {
       return res.status(404).json({ error: 'Không tìm thấy công việc' });
     }
 
+    const oldTask = taskCheck.recordset[0];
     const labelsStr = Array.isArray(labels) ? labels.join(',') : (labels || '');
 
     await db.query(`
@@ -353,12 +498,54 @@ app.put('/api/tasks/:id', async (req, res) => {
     const workLogsRes = await db.query('SELECT * FROM WorkLogs WHERE taskId = @id', { id });
     const commentsRes = await db.query('SELECT * FROM Comments WHERE taskId = @id', { id });
 
+    if (oldTask.status !== updatedTask.status) {
+      await writeActivityLog({
+        user,
+        action: 'task.status.changed',
+        entityType: 'task',
+        entityId: id,
+        taskId: id,
+        message: `${user.fullName} đổi trạng thái "${updatedTask.title}" từ ${oldTask.status} sang ${updatedTask.status}`
+      });
+
+      await notifyTaskParticipants(updatedTask, user, {
+        title: 'Trạng thái công việc thay đổi',
+        message: `${user.fullName} đổi trạng thái "${updatedTask.title}" từ ${oldTask.status} sang ${updatedTask.status}.`,
+        type: 'task.status.changed',
+        taskId: id,
+        projectId: updatedTask.projectId
+      });
+    }
+
+    if (oldTask.assigneeId !== updatedTask.assigneeId) {
+      const oldAssignees = parseUserIds(oldTask.assigneeId);
+      const newAssignees = parseUserIds(updatedTask.assigneeId);
+      const newlyAssigned = newAssignees.filter(userId => !oldAssignees.includes(userId));
+
+      await writeActivityLog({
+        user,
+        action: 'task.assigned',
+        entityType: 'task',
+        entityId: id,
+        taskId: id,
+        message: `${user.fullName} cập nhật người phụ trách cho "${updatedTask.title}"`
+      });
+
+      await createNotificationsForUsers(newlyAssigned, {
+        title: 'Bạn được giao công việc',
+        message: `${user.fullName} đã giao công việc "${updatedTask.title}" cho bạn.`,
+        type: 'task.assigned',
+        taskId: id,
+        projectId: updatedTask.projectId
+      }, user);
+    }
+
     res.json({
       ...updatedTask,
       labels: updatedTask.labels ? updatedTask.labels.split(',') : [],
       subTasks: subTasksRes.recordset.map(s => ({ ...s, isCompleted: !!s.isCompleted })),
       workLogs: workLogsRes.recordset,
-      comments: commentsRes.recordset
+      comments: commentsRes.recordset.map(mapComment)
     });
   } catch (err) {
     console.error('Update task error:', err);
@@ -385,8 +572,7 @@ app.patch('/api/tasks/:id/status', async (req, res) => {
     }
 
     const task = taskCheck.recordset[0];
-    const assignees = task.assigneeId ? task.assigneeId.split(',') : [];
-    if (!isManagerRole(user) && !assignees.includes(user.id)) {
+    if (!canInteractWithTask(user, task)) {
       return res.status(403).json({ error: 'Bạn chỉ được chỉnh sửa trạng thái của công việc được giao cho mình' });
     }
 
@@ -398,12 +584,31 @@ app.patch('/api/tasks/:id/status', async (req, res) => {
     const workLogsRes = await db.query('SELECT * FROM WorkLogs WHERE taskId = @id', { id });
     const commentsRes = await db.query('SELECT * FROM Comments WHERE taskId = @id', { id });
 
+    if (task.status !== status) {
+      await writeActivityLog({
+        user,
+        action: 'task.status.changed',
+        entityType: 'task',
+        entityId: id,
+        taskId: id,
+        message: `${user.fullName} đổi trạng thái "${task.title}" từ ${task.status} sang ${status}`
+      });
+
+      await notifyTaskParticipants(updatedTask, user, {
+        title: 'Trạng thái công việc thay đổi',
+        message: `${user.fullName} đổi trạng thái "${task.title}" từ ${task.status} sang ${status}.`,
+        type: 'task.status.changed',
+        taskId: id,
+        projectId: updatedTask.projectId
+      });
+    }
+
     res.json({
       ...updatedTask,
       labels: updatedTask.labels ? updatedTask.labels.split(',') : [],
       subTasks: subTasksRes.recordset.map(s => ({ ...s, isCompleted: !!s.isCompleted })),
       workLogs: workLogsRes.recordset,
-      comments: commentsRes.recordset
+      comments: commentsRes.recordset.map(mapComment)
     });
   } catch (err) {
     console.error('Update task status error:', err);
@@ -531,8 +736,7 @@ app.put('/api/tasks/:id/subtasks/:subTaskId/toggle', async (req, res) => {
     }
 
     const task = taskCheck.recordset[0];
-    const assignees = task.assigneeId ? task.assigneeId.split(',').map(id => id.trim()) : [];
-    if (!isManagerRole(user) && !assignees.includes(user.id)) {
+    if (!canInteractWithTask(user, task)) {
       return res.status(403).json({ error: 'Bạn chỉ được chỉnh sửa công việc con của task được giao cho mình' });
     }
 
@@ -595,8 +799,7 @@ app.post('/api/tasks/:id/worklogs', async (req, res) => {
     }
 
     const task = taskCheck.recordset[0];
-    const assignees = task.assigneeId ? task.assigneeId.split(',').map(id => id.trim()) : [];
-    if (!isManagerRole(user) && !assignees.includes(user.id)) {
+    if (!canInteractWithTask(user, task)) {
       return res.status(403).json({ error: 'Bạn chỉ được ghi nhận giờ làm việc cho task được giao cho mình' });
     }
 
@@ -627,6 +830,11 @@ app.post('/api/tasks/:id/comments', async (req, res) => {
   try {
     const { id } = req.params;
     const { content } = req.body;
+    const trimmedContent = (content || '').trim();
+
+    if (!trimmedContent) {
+      return res.status(400).json({ error: 'Nội dung bình luận không được để trống' });
+    }
     
     const user = await getUserByHeader(req);
     if (!user) {
@@ -642,24 +850,56 @@ app.post('/api/tasks/:id/comments', async (req, res) => {
     }
 
     const task = taskCheck.recordset[0];
-    const assignees = task.assigneeId ? task.assigneeId.split(',').map(id => id.trim()) : [];
-    if (!isManagerRole(user) && !assignees.includes(user.id)) {
+    if (!canInteractWithTask(user, task)) {
       return res.status(403).json({ error: 'Bạn chỉ được phép bình luận trên task được giao cho mình' });
     }
 
     const commentId = 'c_' + Date.now();
-    const createdAt = new Date().toISOString();
+    const createdAt = getNowIso();
 
     await db.query(`
-      INSERT INTO Comments (id, taskId, userName, userAvatar, content, createdAt)
-      VALUES (@commentId, @id, @userName, @userAvatar, @content, @createdAt)
+      INSERT INTO Comments (id, taskId, userId, userName, userAvatar, content, createdAt, updatedAt)
+      VALUES (@commentId, @id, @userId, @userName, @userAvatar, @content, @createdAt, NULL)
     `, {
-      commentId, id, userName: user.fullName, userAvatar: user.avatarUrl, content, createdAt
+      commentId, id, userId: user.id, userName: user.fullName, userAvatar: user.avatarUrl, content: trimmedContent, createdAt
     });
 
-    res.status(201).json({
-      id: commentId, userName: user.fullName, userAvatar: user.avatarUrl, content, createdAt
+    const newComment = {
+      id: commentId,
+      taskId: id,
+      userId: user.id,
+      userName: user.fullName,
+      userAvatar: user.avatarUrl,
+      content: trimmedContent,
+      createdAt,
+      updatedAt: null
+    };
+
+    await writeActivityLog({
+      user,
+      action: 'comment.created',
+      entityType: 'comment',
+      entityId: commentId,
+      taskId: id,
+      message: `${user.fullName} đã bình luận trong công việc "${task.title}"`
     });
+
+    const commentUsersRes = await db.query('SELECT DISTINCT userId FROM Comments WHERE taskId = @id AND userId IS NOT NULL', { id });
+    const commentUserIds = commentUsersRes.recordset.map(row => row.userId);
+
+    await createNotificationsForUsers([
+      ...parseUserIds(task.assigneeId),
+      task.creatorId,
+      ...commentUserIds
+    ], {
+      title: 'Bình luận mới',
+      message: `${user.fullName} đã bình luận trong công việc "${task.title}".`,
+      type: 'comment.created',
+      taskId: id,
+      projectId: task.projectId
+    }, user);
+
+    res.status(201).json(newComment);
   } catch (err) {
     console.error('Create comment error:', err);
     res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
@@ -669,6 +909,340 @@ app.post('/api/tasks/:id/comments', async (req, res) => {
 
 
 // Khởi chạy Server
+app.get('/api/tasks/:id/comments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const taskCheck = await db.query('SELECT * FROM Tasks WHERE id = @id', { id });
+    if (taskCheck.recordset.length === 0) {
+      return res.status(404).json({ error: 'Không tìm thấy công việc' });
+    }
+
+    const task = taskCheck.recordset[0];
+    if (!isViewerRole(user) && !canInteractWithTask(user, task)) {
+      return res.status(403).json({ error: 'Bạn không có quyền xem bình luận của công việc này' });
+    }
+
+    const commentsRes = await db.query('SELECT * FROM Comments WHERE taskId = @id ORDER BY createdAt ASC', { id });
+    res.json(commentsRes.recordset.map(mapComment));
+  } catch (err) {
+    console.error('Fetch comments error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
+app.put('/api/tasks/:id/comments/:commentId', async (req, res) => {
+  try {
+    const { id, commentId } = req.params;
+    const { content } = req.body;
+    const trimmedContent = (content || '').trim();
+
+    if (!trimmedContent) {
+      return res.status(400).json({ error: 'Nội dung bình luận không được để trống' });
+    }
+
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (isViewerRole(user)) {
+      return res.status(403).json({ error: 'Viewer không được phép sửa bình luận' });
+    }
+
+    const commentRes = await db.query(`
+      SELECT c.*, t.title AS taskTitle, t.assigneeId, t.creatorId, t.projectId
+      FROM Comments c
+      JOIN Tasks t ON c.taskId = t.id
+      WHERE c.id = @commentId AND c.taskId = @id
+    `, { commentId, id });
+
+    if (commentRes.recordset.length === 0) {
+      return res.status(404).json({ error: 'Không tìm thấy bình luận' });
+    }
+
+    const comment = commentRes.recordset[0];
+    const task = {
+      id,
+      title: comment.taskTitle,
+      assigneeId: comment.assigneeId,
+      creatorId: comment.creatorId,
+      projectId: comment.projectId
+    };
+
+    const ownsComment = comment.userId === user.id || (!comment.userId && comment.userName === user.fullName);
+    if (!canInteractWithTask(user, task) || (!isManagerRole(user) && !ownsComment)) {
+      return res.status(403).json({ error: 'Bạn chỉ được sửa bình luận của mình' });
+    }
+
+    const updatedAt = getNowIso();
+    await db.query(`
+      UPDATE Comments
+      SET content = @content, updatedAt = @updatedAt
+      WHERE id = @commentId AND taskId = @id
+    `, { content: trimmedContent, updatedAt, commentId, id });
+
+    await writeActivityLog({
+      user,
+      action: 'comment.updated',
+      entityType: 'comment',
+      entityId: commentId,
+      taskId: id,
+      message: `${user.fullName} đã sửa bình luận trong công việc "${task.title}"`
+    });
+
+    res.json({
+      ...mapComment(comment),
+      content: trimmedContent,
+      updatedAt
+    });
+  } catch (err) {
+    console.error('Update comment error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
+app.delete('/api/tasks/:id/comments/:commentId', async (req, res) => {
+  try {
+    const { id, commentId } = req.params;
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (isViewerRole(user)) {
+      return res.status(403).json({ error: 'Viewer không được phép xóa bình luận' });
+    }
+
+    const commentRes = await db.query(`
+      SELECT c.*, t.title AS taskTitle, t.assigneeId, t.creatorId, t.projectId
+      FROM Comments c
+      JOIN Tasks t ON c.taskId = t.id
+      WHERE c.id = @commentId AND c.taskId = @id
+    `, { commentId, id });
+
+    if (commentRes.recordset.length === 0) {
+      return res.status(404).json({ error: 'Không tìm thấy bình luận' });
+    }
+
+    const comment = commentRes.recordset[0];
+    const task = {
+      id,
+      title: comment.taskTitle,
+      assigneeId: comment.assigneeId,
+      creatorId: comment.creatorId,
+      projectId: comment.projectId
+    };
+
+    const ownsComment = comment.userId === user.id || (!comment.userId && comment.userName === user.fullName);
+    if (!canInteractWithTask(user, task) || (!isManagerRole(user) && !ownsComment)) {
+      return res.status(403).json({ error: 'Bạn chỉ được xóa bình luận của mình' });
+    }
+
+    await db.query('DELETE FROM Comments WHERE id = @commentId AND taskId = @id', { commentId, id });
+
+    await writeActivityLog({
+      user,
+      action: 'comment.deleted',
+      entityType: 'comment',
+      entityId: commentId,
+      taskId: id,
+      message: `${user.fullName} đã xóa bình luận trong công việc "${task.title}"`
+    });
+
+    res.json({ message: 'Xóa bình luận thành công', id: commentId });
+  } catch (err) {
+    console.error('Delete comment error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
+// 8. Notifications APIs
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const status = String(req.query.status || 'all');
+    let whereClause = 'WHERE userId = @userId';
+    const params = { userId: user.id };
+
+    if (status === 'unread') {
+      whereClause += ' AND isRead = 0';
+    } else if (status === 'read') {
+      whereClause += ' AND isRead = 1';
+    }
+
+    const notificationsRes = await db.query(`
+      SELECT * FROM Notifications
+      ${whereClause}
+      ORDER BY createdAt DESC
+    `, params);
+
+    res.json(notificationsRes.recordset.map(mapNotification));
+  } catch (err) {
+    console.error('Fetch notifications error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
+app.get('/api/notifications/unread-count', async (req, res) => {
+  try {
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const countRes = await db.query('SELECT COUNT(1) AS count FROM Notifications WHERE userId = @userId AND isRead = 0', { userId: user.id });
+    res.json({ count: countRes.recordset[0].count || 0 });
+  } catch (err) {
+    console.error('Fetch unread count error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
+app.post('/api/notifications', async (req, res) => {
+  try {
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { userId, title, message, type, taskId, projectId } = req.body;
+    const targetUserId = userId || user.id;
+
+    if (targetUserId !== user.id && !isManagerRole(user)) {
+      return res.status(403).json({ error: 'Bạn không có quyền tạo thông báo cho người dùng khác' });
+    }
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ error: 'Tiêu đề thông báo không được để trống' });
+    }
+
+    const targetUser = await db.query('SELECT 1 FROM Users WHERE id = @targetUserId', { targetUserId });
+    if (targetUser.recordset.length === 0) {
+      return res.status(404).json({ error: 'Không tìm thấy người nhận thông báo' });
+    }
+
+    const notification = await createNotification({
+      userId: targetUserId,
+      title: String(title).trim(),
+      message: message || '',
+      type: type || 'manual',
+      taskId: taskId || null,
+      projectId: projectId || null,
+      actor: user
+    });
+
+    await writeActivityLog({
+      user,
+      action: 'notification.created',
+      entityType: 'notification',
+      entityId: notification.id,
+      taskId: taskId || null,
+      message: `${user.fullName} đã tạo thông báo "${notification.title}"`
+    });
+
+    res.status(201).json(notification);
+  } catch (err) {
+    console.error('Create notification error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
+app.patch('/api/notifications/mark-all-read', async (req, res) => {
+  try {
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const result = await db.query('UPDATE Notifications SET isRead = 1 WHERE userId = @userId AND isRead = 0', { userId: user.id });
+    res.json({ message: 'Đã đánh dấu tất cả thông báo là đã đọc', updated: result.rowsAffected?.[0] || 0 });
+  } catch (err) {
+    console.error('Mark all notifications read error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
+app.patch('/api/notifications/:id/read', async (req, res) => {
+  try {
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const notificationRes = await db.query('SELECT * FROM Notifications WHERE id = @id AND userId = @userId', { id, userId: user.id });
+    if (notificationRes.recordset.length === 0) {
+      return res.status(404).json({ error: 'Không tìm thấy thông báo' });
+    }
+
+    await db.query('UPDATE Notifications SET isRead = 1 WHERE id = @id AND userId = @userId', { id, userId: user.id });
+    res.json(mapNotification({ ...notificationRes.recordset[0], isRead: true }));
+  } catch (err) {
+    console.error('Mark notification read error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
+app.delete('/api/notifications/:id', async (req, res) => {
+  try {
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const notificationRes = await db.query('SELECT 1 FROM Notifications WHERE id = @id AND userId = @userId', { id, userId: user.id });
+    if (notificationRes.recordset.length === 0) {
+      return res.status(404).json({ error: 'Không tìm thấy thông báo' });
+    }
+
+    await db.query('DELETE FROM Notifications WHERE id = @id AND userId = @userId', { id, userId: user.id });
+    res.json({ message: 'Xóa thông báo thành công', id });
+  } catch (err) {
+    console.error('Delete notification error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
+app.get('/api/activity-logs', async (req, res) => {
+  try {
+    const user = await getUserByHeader(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const taskId = req.query.taskId ? String(req.query.taskId) : null;
+    if (taskId) {
+      const taskRes = await db.query('SELECT * FROM Tasks WHERE id = @taskId', { taskId });
+      if (taskRes.recordset.length === 0) {
+        return res.status(404).json({ error: 'Không tìm thấy công việc' });
+      }
+      if (!isViewerRole(user) && !canInteractWithTask(user, taskRes.recordset[0])) {
+        return res.status(403).json({ error: 'Bạn không có quyền xem nhật ký của công việc này' });
+      }
+
+      const logsRes = await db.query('SELECT TOP 100 * FROM ActivityLogs WHERE taskId = @taskId ORDER BY createdAt DESC', { taskId });
+      return res.json(logsRes.recordset);
+    }
+
+    if (!isManagerRole(user)) {
+      return res.status(403).json({ error: 'Chỉ Project Manager/Admin mới được xem toàn bộ nhật ký hoạt động' });
+    }
+
+    const logsRes = await db.query('SELECT TOP 100 * FROM ActivityLogs ORDER BY createdAt DESC');
+    res.json(logsRes.recordset);
+  } catch (err) {
+    console.error('Fetch activity logs error:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+});
+
 db.initDB()
   .then(() => {
     isDbConnected = true;

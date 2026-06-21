@@ -4,6 +4,7 @@ export interface User {
   avatarUrl: string;
   role: string;
   isOnline: boolean;
+  email?: string;
 }
 
 export interface Project {
@@ -20,9 +21,38 @@ export interface Project {
 
 export interface Comment {
   id: string;
+  taskId?: string;
+  userId?: string;
   userName: string;
   userAvatar: string;
   content: string;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  type: string;
+  taskId?: string | null;
+  projectId?: string | null;
+  actorId?: string | null;
+  actorName?: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface ActivityLog {
+  id: string;
+  userId?: string | null;
+  userName?: string | null;
+  action: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  taskId?: string | null;
+  message?: string | null;
   createdAt: string;
 }
 
@@ -74,6 +104,8 @@ export const defaultProjects: Project[] = [];
 
 export const defaultTasks: Task[] = [];
 
+export const defaultNotifications: Notification[] = [];
+
 export const mockStorage = {
   getUsers(): User[] {
     const data = localStorage.getItem('ph_users');
@@ -82,6 +114,10 @@ export const mockStorage = {
       return defaultUsers;
     }
     return JSON.parse(data);
+  },
+
+  saveUsers(users: User[]) {
+    localStorage.setItem('ph_users', JSON.stringify(users));
   },
 
   getProjects(): Project[] {
@@ -108,6 +144,19 @@ export const mockStorage = {
 
   saveTasks(tasks: Task[]) {
     localStorage.setItem('ph_tasks', JSON.stringify(tasks));
+  },
+
+  getNotifications(): Notification[] {
+    const data = localStorage.getItem('ph_notifications');
+    if (!data) {
+      localStorage.setItem('ph_notifications', JSON.stringify(defaultNotifications));
+      return defaultNotifications;
+    }
+    return JSON.parse(data);
+  },
+
+  saveNotifications(notifications: Notification[]) {
+    localStorage.setItem('ph_notifications', JSON.stringify(notifications));
   },
 
   getCurrentUser(): User {

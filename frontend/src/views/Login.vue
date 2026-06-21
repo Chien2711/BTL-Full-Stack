@@ -36,7 +36,7 @@ function handleButtonClick(event: MouseEvent) {
   button.appendChild(circle);
 }
 
-async function handleLogin(event: Event) {
+async function handleLogin() {
   if (!email.value || !password.value) {
     errorMsg.value = 'Vui lòng điền đầy đủ email và mật khẩu';
     return;
@@ -78,7 +78,7 @@ async function handleLogin(event: Event) {
           </svg>
         </div>
         <h2 class="text-2xl font-black text-white tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text">Đăng nhập tài khoản</h2>
-        <p class="text-xs text-slate-400 mt-2 font-semibold tracking-wide uppercase">Không gian làm việc ProjectHub</p>
+        <p class="text-xs text-slate-400 mt-2 font-semibold tracking-wide uppercase">Không gian làm việc SprintFlow</p>
       </div>
 
       <!-- Notification Banner -->

@@ -15,11 +15,10 @@
 
       <!-- User Profile Card -->
       <div class="flex items-center space-x-4">
-        <!-- Notification icon stub -->
-        <button class="relative p-2 hover:bg-slate-50 rounded-xl transition-colors">
+        <router-link to="/notifications" class="relative p-2 hover:bg-slate-50 rounded-xl transition-colors">
           <Bell class="w-5 h-5 text-slate-500" />
-          <span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white"></span>
-        </button>
+          <span v-if="taskStore.unreadNotificationCount > 0" class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white"></span>
+        </router-link>
         
         <!-- Date -->
         <span class="text-xs text-slate-400 font-medium">{{ formattedDate }}</span>
@@ -300,7 +299,7 @@
 
     <!-- Footer -->
     <footer class="mt-auto pt-8 border-t border-slate-100 text-center text-[10px] text-slate-400 px-8 flex justify-between items-center max-w-6xl mx-auto w-full">
-      <span>© 2026 ProjectHub - Hệ thống quản lý dự án & phân công chuyên nghiệp</span>
+      <span>© 2026 SprintFlow - Hệ thống quản lý dự án & phân công công việc</span>
       <div class="space-x-4">
         <a href="#" class="hover:text-slate-600">Trang chủ</a>
         <a href="#" class="hover:text-slate-600">Điều khoản</a>

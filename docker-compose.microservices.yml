@@ -1,0 +1,65 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    ports:
+      - "14333:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "ProjectHub@2026"
+    volumes:
+      - projecthub-sql-data:/var/opt/mssql
+
+  project-service:
+    build:
+      context: ./Microservices/ProjectService
+    ports:
+      - "5001:5001"
+    environment:
+      ASPNETCORE_URLS: http://+:5001
+      ConnectionStrings__ProjectDb: "Server=sqlserver,1433;Database=ProjectDB;User Id=sa;Password=ProjectHub@2026;TrustServerCertificate=True;"
+    depends_on:
+      - sqlserver
+    restart: unless-stopped
+
+  task-service:
+    build:
+      context: ./Microservices/TaskService
+    ports:
+      - "5002:5002"
+    environment:
+      ASPNETCORE_URLS: http://+:5002
+      ConnectionStrings__TaskDb: "Server=sqlserver,1433;Database=TaskDB;User Id=sa;Password=ProjectHub@2026;TrustServerCertificate=True;"
+      Services__NotifyService: http://notify-service:5003
+    depends_on:
+      - sqlserver
+      - notify-service
+    restart: unless-stopped
+
+  notify-service:
+    build:
+      context: ./Microservices/NotifyService
+    ports:
+      - "5003:5003"
+    environment:
+      ASPNETCORE_URLS: http://+:5003
+      ConnectionStrings__NotifyDb: "Server=sqlserver,1433;Database=NotifyDB;User Id=sa;Password=ProjectHub@2026;TrustServerCertificate=True;"
+    depends_on:
+      - sqlserver
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ./Microservices/ApiGateway
+    ports:
+      - "7000:7000"
+    environment:
+      ASPNETCORE_URLS: http://+:7000
+      OcelotConfig: ocelot.docker.json
+    depends_on:
+      - project-service
+      - task-service
+      - notify-service
+    restart: unless-stopped
+
+volumes:
+  projecthub-sql-data:

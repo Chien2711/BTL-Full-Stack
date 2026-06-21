@@ -1,4 +1,3 @@
-import sql from 'mssql';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -10,20 +9,36 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const targetDbName = process.env.DB_DATABASE || 'ProjectManagement';
+const useNativeSqlDriver = process.env.DB_DRIVER === 'msnodesqlv8' || !!process.env.DB_CONNECTION_STRING;
+const sqlModule = await import(useNativeSqlDriver ? 'mssql/msnodesqlv8.js' : 'mssql');
+const sql = sqlModule.default;
 
-const config = {
-  user: process.env.DB_USER || 'sa',
-  password: process.env.DB_PASSWORD || 'YourPassword123',
-  server: process.env.DB_SERVER || 'localhost',
-  port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : undefined,
-  database: 'master', // Start with master database to check/create target database
-  options: {
-    instanceName: process.env.DB_INSTANCE || undefined,
-    encrypt: process.env.DB_ENCRYPT === 'true',
-    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE === 'true',
-    enableArithAbort: true
+function connectionStringForDatabase(databaseName) {
+  const base = process.env.DB_CONNECTION_STRING;
+  if (!base) return null;
+
+  const separator = base.trim().endsWith(';') ? '' : ';';
+  if (/Database\s*=/i.test(base)) {
+    return base.replace(/Database\s*=\s*[^;]*/i, `Database=${databaseName}`);
   }
-};
+  return `${base}${separator}Database=${databaseName};`;
+}
+
+const config = process.env.DB_CONNECTION_STRING
+  ? { connectionString: connectionStringForDatabase('master') }
+  : {
+      user: process.env.DB_USER || 'sa',
+      password: process.env.DB_PASSWORD || 'YourPassword123',
+      server: process.env.DB_SERVER || 'localhost',
+      port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : undefined,
+      database: 'master', // Start with master database to check/create target database
+      options: {
+        instanceName: process.env.DB_INSTANCE || undefined,
+        encrypt: process.env.DB_ENCRYPT === 'true',
+        trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE === 'true',
+        enableArithAbort: true
+      }
+    };
 
 export let pool = null;
 
@@ -57,7 +72,9 @@ export async function initDB() {
     await masterPool.close();
     
     // Connect to the target database
-    const targetConfig = { ...config, database: targetDbName };
+    const targetConfig = process.env.DB_CONNECTION_STRING
+      ? { connectionString: connectionStringForDatabase(targetDbName) }
+      : { ...config, database: targetDbName };
     console.log(`Connecting to database ${targetDbName}...`);
     pool = await sql.connect(targetConfig);
     console.log('Connected to target database successfully.');
@@ -127,13 +144,29 @@ async function createTables() {
       priority NVARCHAR(50),
       dueDate VARCHAR(50),
       projectId NVARCHAR(50) REFERENCES Projects(id) ON DELETE CASCADE,
-      assigneeId NVARCHAR(50) REFERENCES Users(id),
+      assigneeId NVARCHAR(500),
       creatorId NVARCHAR(50) REFERENCES Users(id),
       createdAt VARCHAR(50),
       labels NVARCHAR(500),
       estimatedHours FLOAT DEFAULT 0,
       loggedHours FLOAT DEFAULT 0
     )
+  `);
+
+  await req.query(`
+    DECLARE @assigneeFk NVARCHAR(128);
+
+    SELECT @assigneeFk = fk.name
+    FROM sys.foreign_keys fk
+    JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+    JOIN sys.columns c ON fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id
+    WHERE fk.parent_object_id = OBJECT_ID('Tasks') AND c.name = 'assigneeId';
+
+    IF @assigneeFk IS NOT NULL
+      EXEC('ALTER TABLE Tasks DROP CONSTRAINT [' + @assigneeFk + ']');
+
+    IF COL_LENGTH('Tasks', 'assigneeId') IS NOT NULL
+      ALTER TABLE Tasks ALTER COLUMN assigneeId NVARCHAR(500) NULL;
   `);
 
   // SubTasks Table
@@ -166,9 +199,53 @@ async function createTables() {
     CREATE TABLE Comments (
       id NVARCHAR(50) PRIMARY KEY,
       taskId NVARCHAR(50) REFERENCES Tasks(id) ON DELETE CASCADE,
+      userId NVARCHAR(50),
       userName NVARCHAR(100),
       userAvatar NVARCHAR(500),
       content NVARCHAR(MAX),
+      createdAt VARCHAR(100),
+      updatedAt VARCHAR(100)
+    )
+  `);
+
+  await req.query(`
+    IF COL_LENGTH('Comments', 'userId') IS NULL
+      ALTER TABLE Comments ADD userId NVARCHAR(50) NULL;
+
+    IF COL_LENGTH('Comments', 'updatedAt') IS NULL
+      ALTER TABLE Comments ADD updatedAt VARCHAR(100) NULL;
+  `);
+
+  // Notifications Table. Keep task/project IDs as references only to respect service boundaries.
+  await req.query(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Notifications' AND xtype='U')
+    CREATE TABLE Notifications (
+      id NVARCHAR(50) PRIMARY KEY,
+      userId NVARCHAR(50) NOT NULL,
+      title NVARCHAR(255) NOT NULL,
+      message NVARCHAR(MAX),
+      type NVARCHAR(80),
+      taskId NVARCHAR(50),
+      projectId NVARCHAR(50),
+      actorId NVARCHAR(50),
+      actorName NVARCHAR(100),
+      isRead BIT DEFAULT 0,
+      createdAt VARCHAR(100)
+    )
+  `);
+
+  // Activity log for automatic history in Comment & Notify service.
+  await req.query(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='ActivityLogs' AND xtype='U')
+    CREATE TABLE ActivityLogs (
+      id NVARCHAR(50) PRIMARY KEY,
+      userId NVARCHAR(50),
+      userName NVARCHAR(100),
+      action NVARCHAR(100) NOT NULL,
+      entityType NVARCHAR(50),
+      entityId NVARCHAR(50),
+      taskId NVARCHAR(50),
+      message NVARCHAR(MAX),
       createdAt VARCHAR(100)
     )
   `);
@@ -302,13 +379,57 @@ async function migrateDataIfNeeded() {
             await pool.request()
               .input('cid', sql.NVarChar, c.id)
               .input('tid', sql.NVarChar, t.id)
+              .input('userId', sql.NVarChar, c.userId || null)
               .input('userName', sql.NVarChar, c.userName)
               .input('userAvatar', sql.NVarChar, c.userAvatar)
               .input('content', sql.NVarChar, c.content)
               .input('createdAt', sql.VarChar, c.createdAt)
-              .query('INSERT INTO Comments (id, taskId, userName, userAvatar, content, createdAt) VALUES (@cid, @tid, @userName, @userAvatar, @content, @createdAt)');
+              .input('updatedAt', sql.VarChar, c.updatedAt || null)
+              .query('INSERT INTO Comments (id, taskId, userId, userName, userAvatar, content, createdAt, updatedAt) VALUES (@cid, @tid, @userId, @userName, @userAvatar, @content, @createdAt, @updatedAt)');
           }
         }
+      }
+    }
+
+    if (data.notifications && data.notifications.length > 0) {
+      console.log(`Migrating ${data.notifications.length} notifications...`);
+      for (const n of data.notifications) {
+        await pool.request()
+          .input('id', sql.NVarChar, n.id)
+          .input('userId', sql.NVarChar, n.userId)
+          .input('title', sql.NVarChar, n.title)
+          .input('message', sql.NVarChar, n.message)
+          .input('type', sql.NVarChar, n.type)
+          .input('taskId', sql.NVarChar, n.taskId || null)
+          .input('projectId', sql.NVarChar, n.projectId || null)
+          .input('actorId', sql.NVarChar, n.actorId || null)
+          .input('actorName', sql.NVarChar, n.actorName || null)
+          .input('isRead', sql.Bit, n.isRead ? 1 : 0)
+          .input('createdAt', sql.VarChar, n.createdAt)
+          .query(`
+            INSERT INTO Notifications (id, userId, title, message, type, taskId, projectId, actorId, actorName, isRead, createdAt)
+            VALUES (@id, @userId, @title, @message, @type, @taskId, @projectId, @actorId, @actorName, @isRead, @createdAt)
+          `);
+      }
+    }
+
+    if (data.activityLogs && data.activityLogs.length > 0) {
+      console.log(`Migrating ${data.activityLogs.length} activity logs...`);
+      for (const a of data.activityLogs) {
+        await pool.request()
+          .input('id', sql.NVarChar, a.id)
+          .input('userId', sql.NVarChar, a.userId || null)
+          .input('userName', sql.NVarChar, a.userName || null)
+          .input('action', sql.NVarChar, a.action)
+          .input('entityType', sql.NVarChar, a.entityType || null)
+          .input('entityId', sql.NVarChar, a.entityId || null)
+          .input('taskId', sql.NVarChar, a.taskId || null)
+          .input('message', sql.NVarChar, a.message || null)
+          .input('createdAt', sql.VarChar, a.createdAt)
+          .query(`
+            INSERT INTO ActivityLogs (id, userId, userName, action, entityType, entityId, taskId, message, createdAt)
+            VALUES (@id, @userId, @userName, @action, @entityType, @entityId, @taskId, @message, @createdAt)
+          `);
       }
     }
     console.log('Migration from database.json to SQL Server completed successfully.');

@@ -1,9 +1,9 @@
 import axios from 'axios';
-import { mockStorage, type User, type Project, type Task, type Comment, type SubTask, type WorkLog } from './mockData';
+import { mockStorage, type User, type Project, type Task, type Comment, type SubTask, type WorkLog, type Notification, type ActivityLog } from './mockData';
 
 // Khởi tạo Axios client với cấu hình kết nối tới .NET Core Backend
 const apiClient = axios.create({
-  baseURL: 'http://localhost:5000/api', // Thay thế bằng đường dẫn API thật của bạn
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:7000/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -39,6 +39,26 @@ export const apiService = {
     }
     const response = await apiClient.get<User>('/users/me');
     return response.data;
+  },
+
+  async updateCurrentUser(data: { fullName: string; avatarUrl?: string }): Promise<{ user: User; token: string }> {
+    if (USE_MOCK) {
+      const users = mockStorage.getUsers();
+      const current = users[0];
+      current.fullName = data.fullName;
+      current.avatarUrl = data.avatarUrl || current.avatarUrl;
+      mockStorage.saveUsers(users);
+      return Promise.resolve({ user: current, token: 'mock-token-' + current.id });
+    }
+    const response = await apiClient.put<{ user: User; token: string }>('/users/me', data);
+    return response.data;
+  },
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    if (USE_MOCK) {
+      return Promise.resolve();
+    }
+    await apiClient.put('/users/me/password', { currentPassword, newPassword });
   },
 
   // --- PROJECT API ---
@@ -222,6 +242,8 @@ export const apiService = {
       const currentUser = mockStorage.getCurrentUser();
       const newComment: Comment = {
         id: 'c_' + Date.now(),
+        taskId,
+        userId: currentUser.id,
         userName: currentUser.fullName,
         userAvatar: currentUser.avatarUrl,
         content,
@@ -236,6 +258,133 @@ export const apiService = {
       return Promise.reject(new Error('Task not found'));
     }
     const response = await apiClient.post<Comment>(`/tasks/${taskId}/comments`, { content });
+    return response.data;
+  },
+
+  async getComments(taskId: string): Promise<Comment[]> {
+    if (USE_MOCK) {
+      const task = mockStorage.getTasks().find(t => t.id === taskId);
+      return Promise.resolve(task?.comments || []);
+    }
+    const response = await apiClient.get<Comment[]>(`/tasks/${taskId}/comments`);
+    return response.data;
+  },
+
+  async updateComment(taskId: string, commentId: string, content: string): Promise<Comment> {
+    if (USE_MOCK) {
+      const tasks = mockStorage.getTasks();
+      const task = tasks.find(t => t.id === taskId);
+      const comment = task?.comments?.find(c => c.id === commentId);
+      if (comment) {
+        comment.content = content;
+        comment.updatedAt = new Date().toISOString();
+        mockStorage.saveTasks(tasks);
+        return Promise.resolve(comment);
+      }
+      return Promise.reject(new Error('Comment not found'));
+    }
+    const response = await apiClient.put<Comment>(`/tasks/${taskId}/comments/${commentId}`, { content });
+    return response.data;
+  },
+
+  async deleteComment(taskId: string, commentId: string): Promise<void> {
+    if (USE_MOCK) {
+      const tasks = mockStorage.getTasks();
+      const task = tasks.find(t => t.id === taskId);
+      if (task && task.comments) {
+        task.comments = task.comments.filter(c => c.id !== commentId);
+        mockStorage.saveTasks(tasks);
+        return Promise.resolve();
+      }
+      return Promise.reject(new Error('Comment not found'));
+    }
+    await apiClient.delete(`/tasks/${taskId}/comments/${commentId}`);
+  },
+
+  // --- NOTIFICATION API ---
+  async getNotifications(status: 'all' | 'unread' | 'read' = 'all'): Promise<Notification[]> {
+    if (USE_MOCK) {
+      const currentUser = mockStorage.getCurrentUser();
+      let notifications = mockStorage.getNotifications().filter(n => n.userId === currentUser.id);
+      if (status === 'unread') notifications = notifications.filter(n => !n.isRead);
+      if (status === 'read') notifications = notifications.filter(n => n.isRead);
+      return Promise.resolve(notifications);
+    }
+    const response = await apiClient.get<Notification[]>('/notifications', { params: { status } });
+    return response.data;
+  },
+
+  async getUnreadNotificationCount(): Promise<number> {
+    if (USE_MOCK) {
+      const currentUser = mockStorage.getCurrentUser();
+      return Promise.resolve(mockStorage.getNotifications().filter(n => n.userId === currentUser.id && !n.isRead).length);
+    }
+    const response = await apiClient.get<{ count: number }>('/notifications/unread-count');
+    return response.data.count;
+  },
+
+  async createNotification(data: Omit<Notification, 'id' | 'isRead' | 'createdAt' | 'actorId' | 'actorName'>): Promise<Notification> {
+    if (USE_MOCK) {
+      const notification: Notification = {
+        ...data,
+        id: 'noti_' + Date.now(),
+        actorId: undefined,
+        actorName: undefined,
+        isRead: false,
+        createdAt: new Date().toISOString()
+      };
+      const notifications = mockStorage.getNotifications();
+      notifications.unshift(notification);
+      mockStorage.saveNotifications(notifications);
+      return Promise.resolve(notification);
+    }
+    const response = await apiClient.post<Notification>('/notifications', data);
+    return response.data;
+  },
+
+  async markNotificationRead(notificationId: string): Promise<Notification> {
+    if (USE_MOCK) {
+      const notifications = mockStorage.getNotifications();
+      const notification = notifications.find(n => n.id === notificationId);
+      if (notification) {
+        notification.isRead = true;
+        mockStorage.saveNotifications(notifications);
+        return Promise.resolve(notification);
+      }
+      return Promise.reject(new Error('Notification not found'));
+    }
+    const response = await apiClient.patch<Notification>(`/notifications/${notificationId}/read`);
+    return response.data;
+  },
+
+  async markAllNotificationsRead(): Promise<void> {
+    if (USE_MOCK) {
+      const currentUser = mockStorage.getCurrentUser();
+      const notifications = mockStorage.getNotifications().map(n => (
+        n.userId === currentUser.id ? { ...n, isRead: true } : n
+      ));
+      mockStorage.saveNotifications(notifications);
+      return Promise.resolve();
+    }
+    await apiClient.patch('/notifications/mark-all-read');
+  },
+
+  async deleteNotification(notificationId: string): Promise<void> {
+    if (USE_MOCK) {
+      const notifications = mockStorage.getNotifications().filter(n => n.id !== notificationId);
+      mockStorage.saveNotifications(notifications);
+      return Promise.resolve();
+    }
+    await apiClient.delete(`/notifications/${notificationId}`);
+  },
+
+  async getActivityLogs(taskId?: string): Promise<ActivityLog[]> {
+    if (USE_MOCK) {
+      return Promise.resolve([]);
+    }
+    const response = await apiClient.get<ActivityLog[]>('/activity-logs', {
+      params: taskId ? { taskId } : undefined
+    });
     return response.data;
   },
 
@@ -259,17 +408,19 @@ export const apiService = {
     await apiClient.put(`/projects/${projectId}/members`, { members });
   },
 
-  async updateUserRole(userId: string, role: string): Promise<void> {
+  async updateUserRole(userId: string, role: string): Promise<User> {
     if (USE_MOCK) {
       const users = mockStorage.getUsers();
       const u = users.find(user => user.id === userId);
       if (u) {
         u.role = role;
         mockStorage.saveUsers(users);
+        return Promise.resolve(u);
       }
-      return Promise.resolve();
+      return Promise.reject(new Error('User not found'));
     }
-    await apiClient.put(`/users/${userId}/role`, { role });
+    const response = await apiClient.put<User>(`/users/${userId}/role`, { role });
+    return response.data;
   },
 
   // --- PROJECT PROGRESS API ---

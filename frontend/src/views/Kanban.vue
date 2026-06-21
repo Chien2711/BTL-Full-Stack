@@ -192,7 +192,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { Search, Plus } from '@lucide/vue';
 import { useTaskStore } from '../stores/taskStore';
 import type { Task } from '../services/mockData';
@@ -202,6 +202,10 @@ import QuickTaskModal from '../components/QuickTaskModal.vue';
 import TaskDetailModal from '../components/TaskDetailModal.vue';
 
 const taskStore = useTaskStore();
+
+onMounted(() => {
+  taskStore.init();
+});
 
 // Project health statistics computed values
 const projectTasks = computed(() => {
@@ -271,11 +275,11 @@ const columns = [
 
 
 // Drag & Drop Handlers
-function onDragEnter(event: DragEvent, status: Task['status']) {
+function onDragEnter(_event: DragEvent, status: Task['status']) {
   dragOverColumn.value = status;
 }
 
-function onDragLeave(event: DragEvent, status: Task['status']) {
+function onDragLeave(_event: DragEvent, status: Task['status']) {
   if (dragOverColumn.value === status) {
     dragOverColumn.value = null;
   }

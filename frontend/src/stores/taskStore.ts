@@ -1,12 +1,14 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { type Task, type Project, type User, type Comment, type PublishedEvent } from '../services/mockData';
+import { type Task, type Project, type User, type Notification, type PublishedEvent, type ActivityLog } from '../services/mockData';
 import { apiService } from '../services/api';
 
 export const useTaskStore = defineStore('taskStore', () => {
   const users = ref<User[]>([]);
   const projects = ref<Project[]>([]);
   const tasks = ref<Task[]>([]);
+  const notifications = ref<Notification[]>([]);
+  const activityLogs = ref<ActivityLog[]>([]);
   const currentUser = ref<User>({} as User);
   
   // Event Hub states
@@ -14,6 +16,24 @@ export const useTaskStore = defineStore('taskStore', () => {
   const toasts = ref<{ id: string; type: string; message: string }[]>([]);
 
   // Initialize data asynchronously from API service
+  function normalizeTaskDefaults() {
+    tasks.value.forEach(t => {
+      if (!t.subTasks) t.subTasks = [];
+      if (!t.workLogs) t.workLogs = [];
+      if (!t.comments) t.comments = [];
+      if (!t.labels) t.labels = [];
+      if (t.estimatedHours === undefined) t.estimatedHours = 0;
+      if (t.loggedHours === undefined) t.loggedHours = 0;
+    });
+  }
+
+  async function refreshWorkspaceApis() {
+    users.value = await apiService.getUsers();
+    projects.value = await apiService.getProjects();
+    tasks.value = await apiService.getTasks();
+    normalizeTaskDefaults();
+  }
+
   async function init() {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -22,15 +42,10 @@ export const useTaskStore = defineStore('taskStore', () => {
       projects.value = await apiService.getProjects();
       tasks.value = await apiService.getTasks();
       currentUser.value = await apiService.getCurrentUser();
+      notifications.value = await apiService.getNotifications();
       
       // Set default values if fields are missing in older storage
-      tasks.value.forEach(t => {
-        if (!t.subTasks) t.subTasks = [];
-        if (!t.workLogs) t.workLogs = [];
-        if (!t.labels) t.labels = [];
-        if (t.estimatedHours === undefined) t.estimatedHours = 0;
-        if (t.loggedHours === undefined) t.loggedHours = 0;
-      });
+      normalizeTaskDefaults();
     } catch (error) {
       console.error('Failed to initialize task store:', error);
       logoutAction();
@@ -59,6 +74,7 @@ export const useTaskStore = defineStore('taskStore', () => {
     users.value = [];
     projects.value = [];
     tasks.value = [];
+    notifications.value = [];
   }
 
   // Get project progress dynamically based on completed tasks
@@ -86,6 +102,7 @@ export const useTaskStore = defineStore('taskStore', () => {
   });
 
   const onlineMembersCount = computed(() => users.value.filter(u => u.isOnline).length);
+  const unreadNotificationCount = computed(() => notifications.value.filter(n => !n.isRead).length);
 
   // Today's tasks for current user
   const todayTasks = computed(() => {
@@ -235,16 +252,141 @@ export const useTaskStore = defineStore('taskStore', () => {
   }
 
   // Comments
+  async function refreshTaskComments(taskId: string) {
+    const task = tasks.value.find(t => t.id === taskId);
+    if (!task) return;
+
+    task.comments = await apiService.getComments(taskId);
+  }
+
   async function addComment(taskId: string, content: string) {
     try {
       const task = tasks.value.find(t => t.id === taskId);
       if (task) {
-        const newComment = await apiService.addComment(taskId, content);
-        if (!task.comments) task.comments = [];
-        task.comments.push(newComment);
+        await apiService.addComment(taskId, content);
+        await refreshWorkspaceApis();
+        await refreshTaskComments(taskId);
+        await refreshNotifications();
       }
     } catch (error) {
       console.error('Failed to add comment:', error);
+    }
+  }
+
+  async function updateComment(taskId: string, commentId: string, content: string) {
+    try {
+      const updatedComment = await apiService.updateComment(taskId, commentId, content);
+      await refreshWorkspaceApis();
+      await refreshTaskComments(taskId);
+      await refreshNotifications();
+      return updatedComment;
+    } catch (error) {
+      console.error('Failed to update comment:', error);
+      throw error;
+    }
+  }
+
+  async function deleteComment(taskId: string, commentId: string) {
+    try {
+      await apiService.deleteComment(taskId, commentId);
+      await refreshWorkspaceApis();
+      await refreshTaskComments(taskId);
+      await refreshNotifications();
+    } catch (error) {
+      console.error('Failed to delete comment:', error);
+      throw error;
+    }
+  }
+
+  async function refreshNotifications(status: 'all' | 'unread' | 'read' = 'all') {
+    try {
+      notifications.value = await apiService.getNotifications(status);
+    } catch (error) {
+      console.error('Failed to refresh notifications:', error);
+    }
+  }
+
+  async function markNotificationRead(notificationId: string) {
+    try {
+      const updated = await apiService.markNotificationRead(notificationId);
+      const index = notifications.value.findIndex(n => n.id === notificationId);
+      if (index !== -1) {
+        notifications.value[index] = updated;
+      }
+    } catch (error) {
+      console.error('Failed to mark notification read:', error);
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    try {
+      await apiService.markAllNotificationsRead();
+      notifications.value = notifications.value.map(n => ({ ...n, isRead: true }));
+    } catch (error) {
+      console.error('Failed to mark all notifications read:', error);
+    }
+  }
+
+  async function deleteNotification(notificationId: string) {
+    try {
+      await apiService.deleteNotification(notificationId);
+      notifications.value = notifications.value.filter(n => n.id !== notificationId);
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+    }
+  }
+
+  async function refreshActivityLogs(taskId?: string) {
+    try {
+      activityLogs.value = await apiService.getActivityLogs(taskId);
+    } catch (error) {
+      console.error('Failed to refresh activity logs:', error);
+      activityLogs.value = [];
+    }
+  }
+
+  async function createSelfNotification(title: string, message: string, type = 'manual') {
+    if (!currentUser.value?.id) return;
+    try {
+      const notification = await apiService.createNotification({
+        userId: currentUser.value.id,
+        title,
+        message,
+        type,
+        taskId: null,
+        projectId: null
+      });
+      notifications.value = [notification, ...notifications.value];
+      return notification;
+    } catch (error) {
+      console.error('Failed to create notification:', error);
+      throw error;
+    }
+  }
+
+  async function updateProfile(data: { fullName: string; avatarUrl?: string }) {
+    try {
+      const result = await apiService.updateCurrentUser(data);
+      const updated = result.user;
+      localStorage.setItem('token', result.token);
+      currentUser.value = updated;
+      const index = users.value.findIndex(user => user.id === updated.id);
+      if (index !== -1) {
+        users.value[index] = updated;
+      }
+      return updated;
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      throw error;
+    }
+  }
+
+  async function changePassword(currentPassword: string, newPassword: string) {
+    try {
+      await apiService.changePassword(currentPassword, newPassword);
+    } catch (error) {
+      console.error('Failed to change password:', error);
+      throw error;
     }
   }
 
@@ -355,6 +497,8 @@ export const useTaskStore = defineStore('taskStore', () => {
     users,
     projects,
     tasks,
+    notifications,
+    activityLogs,
     currentUser,
     events,
     toasts,
@@ -364,15 +508,27 @@ export const useTaskStore = defineStore('taskStore', () => {
     inProgressTasks,
     overdueTasks,
     onlineMembersCount,
+    unreadNotificationCount,
     todayTasks,
     addTask,
     updateTaskStatus,
     updateTask,
     deleteTask,
     addComment,
+    refreshTaskComments,
+    updateComment,
+    deleteComment,
+    refreshNotifications,
+    markNotificationRead,
+    markAllNotificationsRead,
+    deleteNotification,
+    refreshActivityLogs,
+    createSelfNotification,
     addProject,
     updateProjectMembers,
     updateUserRole,
+    updateProfile,
+    changePassword,
     
     // N2
     addSubTask,
