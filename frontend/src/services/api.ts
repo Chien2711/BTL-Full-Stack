@@ -1,9 +1,13 @@
 import axios from 'axios';
 import { mockStorage, type User, type Project, type Task, type Comment, type SubTask, type WorkLog, type Notification, type ActivityLog } from './mockData';
 
+const browserHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || `http://${browserHost}:7000/api`;
+export const gatewayHealthUrl = apiBaseUrl.replace(/\/api\/?$/, '/health');
+
 // Khởi tạo Axios client với cấu hình kết nối tới .NET Core Backend
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:7000/api',
+  baseURL: apiBaseUrl,
   headers: {
     'Content-Type': 'application/json',
   },

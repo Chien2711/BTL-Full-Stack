@@ -1,0 +1,20 @@
+{
+  "GatewayPublicBaseUrl": "http://26.251.111.241:7000",
+  "Services": {
+    "ProjectService": {
+      "Name": "Nhom 1 - Project & Member Service",
+      "Host": "26.43.9.197",
+      "Port": 5001
+    },
+    "TaskService": {
+      "Name": "Nhom 2 - Task & Kanban Service",
+      "Host": "26.126.20.22",
+      "Port": 5002
+    },
+    "NotifyService": {
+      "Name": "Nhom 3 - Comment & Notify Service",
+      "Host": "26.251.111.241",
+      "Port": 5003
+    }
+  }
+}

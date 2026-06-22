@@ -38,7 +38,7 @@
           <div class="mt-5 space-y-3">
             <div class="rounded-xl bg-slate-50 p-4">
               <p class="text-[10px] font-black uppercase text-slate-400">API Gateway</p>
-              <p class="mt-1 break-all text-sm font-bold text-slate-900">http://localhost:7000</p>
+              <p class="mt-1 break-all text-sm font-bold text-slate-900">{{ gatewayDisplayUrl }}</p>
             </div>
             <div class="grid grid-cols-3 gap-2 text-center">
               <div class="rounded-xl bg-teal-50 p-3">
@@ -186,6 +186,7 @@
 import { computed, onMounted, reactive } from 'vue';
 import { FileClock, LockKeyhole, Radar, RefreshCw } from '@lucide/vue';
 import { useTaskStore } from '../stores/taskStore';
+import { gatewayHealthUrl } from '../services/api';
 
 type PreferenceKey = 'toast' | 'sound' | 'dailyDigest';
 
@@ -216,6 +217,7 @@ const testNotification = reactive({
 
 const isManager = computed(() => ['Admin', 'Project Manager'].includes(taskStore.currentUser.role));
 const readCount = computed(() => taskStore.notifications.filter(item => item.isRead).length);
+const gatewayDisplayUrl = computed(() => gatewayHealthUrl.replace(/\/health$/, ''));
 
 onMounted(() => {
   loadPreferences();
@@ -241,7 +243,7 @@ function savePreferences() {
 
 async function checkGateway() {
   try {
-    const response = await fetch('http://localhost:7000/health');
+    const response = await fetch(gatewayHealthUrl);
     const data = await response.json();
     gatewayStatus.ok = response.ok;
     gatewayStatus.label = response.ok ? 'Gateway OK' : 'Gateway lỗi';
