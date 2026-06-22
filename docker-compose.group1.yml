@@ -1,0 +1,25 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    ports:
+      - "14333:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "ProjectHub@2026"
+    volumes:
+      - projecthub-group1-sql-data:/var/opt/mssql
+
+  project-service:
+    build:
+      context: ./Microservices/ProjectService
+    ports:
+      - "5001:5001"
+    environment:
+      ASPNETCORE_URLS: http://+:5001
+      ConnectionStrings__ProjectDb: "Server=sqlserver,1433;Database=ProjectDB;User Id=sa;Password=ProjectHub@2026;TrustServerCertificate=True;"
+    depends_on:
+      - sqlserver
+    restart: unless-stopped
+
+volumes:
+  projecthub-group1-sql-data:
