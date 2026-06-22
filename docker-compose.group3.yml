@@ -1,0 +1,47 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    ports:
+      - "14333:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "ProjectHub@2026"
+    volumes:
+      - projecthub-group3-sql-data:/var/opt/mssql
+
+  notify-service:
+    build:
+      context: ./Microservices/NotifyService
+    ports:
+      - "5003:5003"
+    environment:
+      ASPNETCORE_URLS: http://+:5003
+      ConnectionStrings__NotifyDb: "Server=sqlserver,1433;Database=NotifyDB;User Id=sa;Password=ProjectHub@2026;TrustServerCertificate=True;"
+    depends_on:
+      - sqlserver
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ./Microservices/ApiGateway
+    ports:
+      - "7000:7000"
+    environment:
+      ASPNETCORE_URLS: http://+:7000
+      OcelotConfig: ocelot.docker.json
+      RadminServicesConfig: /app/radmin-services.json
+    volumes:
+      - ./deployment/radmin-services.json:/app/radmin-services.json:ro
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+volumes:
+  projecthub-group3-sql-data:
