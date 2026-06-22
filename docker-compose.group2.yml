@@ -1,0 +1,26 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    ports:
+      - "14333:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "ProjectHub@2026"
+    volumes:
+      - projecthub-group2-sql-data:/var/opt/mssql
+
+  task-service:
+    build:
+      context: ./Microservices/TaskService
+    ports:
+      - "5002:5002"
+    environment:
+      ASPNETCORE_URLS: http://+:5002
+      ConnectionStrings__TaskDb: "Server=sqlserver,1433;Database=TaskDB;User Id=sa;Password=ProjectHub@2026;TrustServerCertificate=True;"
+      Services__NotifyService: ${NOTIFY_SERVICE_URL:-http://26.251.111.241:5003}
+    depends_on:
+      - sqlserver
+    restart: unless-stopped
+
+volumes:
+  projecthub-group2-sql-data:
