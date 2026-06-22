@@ -311,17 +311,33 @@ sealed class SqlDb(string connectionString)
     public async Task EnsureDatabaseAsync(string databaseName)
     {
         var master = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master" }.ConnectionString;
-        await using var conn = new SqlConnection(master);
-        await conn.OpenAsync();
+        await using var conn = await OpenWithRetryAsync(master);
         await using var cmd = new SqlCommand($"IF DB_ID(N'{databaseName.Replace("'", "''")}') IS NULL CREATE DATABASE [{databaseName}]", conn);
         await cmd.ExecuteNonQueryAsync();
     }
 
-    public async Task<SqlConnection> OpenAsync()
+    public Task<SqlConnection> OpenAsync()
     {
-        var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
-        return conn;
+        return OpenWithRetryAsync(connectionString);
+    }
+
+    static async Task<SqlConnection> OpenWithRetryAsync(string cs)
+    {
+        const int maxAttempts = 30;
+        for (var attempt = 1; ; attempt++)
+        {
+            var conn = new SqlConnection(cs);
+            try
+            {
+                await conn.OpenAsync();
+                return conn;
+            }
+            catch (SqlException) when (attempt < maxAttempts)
+            {
+                await conn.DisposeAsync();
+                await Task.Delay(TimeSpan.FromSeconds(2));
+            }
+        }
     }
 }
 
