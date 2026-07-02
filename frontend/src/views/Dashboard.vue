@@ -202,6 +202,11 @@
               </div>
             </div>
           </div>
+          
+          <!-- Burndown Chart Section -->
+          <div class="mt-6">
+            <BurndownChart />
+          </div>
         </div>
 
         <!-- Right Side: Today's Tasks Checklist (1 Column Wide) -->
@@ -296,6 +301,8 @@
     <!-- Modals -->
     <QuickTaskModal :isOpen="isCreateModalOpen" @close="isCreateModalOpen = false" />
     <TaskDetailModal :isOpen="isDetailModalOpen" :taskId="activeTaskId" @close="isDetailModalOpen = false" />
+    
+    <GlobalTimerWidget @open-task="openTaskDetails" />
 
     <!-- Footer -->
     <footer class="mt-auto pt-8 border-t border-slate-100 text-center text-[10px] text-slate-400 px-8 flex justify-between items-center max-w-6xl mx-auto w-full">
@@ -327,6 +334,8 @@ import { useTaskStore } from '../stores/taskStore';
 import type { Task } from '../services/mockData';
 import QuickTaskModal from '../components/QuickTaskModal.vue';
 import TaskDetailModal from '../components/TaskDetailModal.vue';
+import GlobalTimerWidget from '../components/GlobalTimerWidget.vue';
+import BurndownChart from '../components/BurndownChart.vue';
 
 
 const taskStore = useTaskStore();

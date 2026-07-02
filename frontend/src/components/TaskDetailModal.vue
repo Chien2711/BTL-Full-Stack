@@ -313,10 +313,40 @@
 
             <!-- Right: Time Tracking Work Logs -->
             <div class="space-y-4">
-              <h4 class="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
-                <Clock class="w-4 h-4 text-emerald-500" />
-                <span>Log thời gian làm việc</span>
-              </h4>
+              <div class="flex items-center justify-between">
+                <h4 class="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
+                  <Clock class="w-4 h-4 text-emerald-500" />
+                  <span>Log thời gian làm việc</span>
+                </h4>
+
+                <!-- Timer Controls -->
+                <div v-if="!isViewer" class="flex items-center space-x-2">
+                  <template v-if="taskStore.activeTimerTaskId === localTask?.id">
+                    <span class="text-xs font-mono font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded-lg">
+                      {{ formatTime(taskStore.activeTimerElapsedSeconds) }}
+                    </span>
+                    <button
+                      @click="handleStopTimer"
+                      class="p-1.5 bg-rose-100 text-rose-600 hover:bg-rose-200 rounded-lg transition-colors cursor-pointer"
+                      title="Dừng đếm giờ"
+                    >
+                      <Square class="w-3.5 h-3.5 fill-current" />
+                    </button>
+                  </template>
+                  <template v-else-if="!taskStore.activeTimerTaskId">
+                    <button
+                      @click="taskStore.startTimer(localTask?.id || '')"
+                      class="flex items-center space-x-1 px-2.5 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors text-xs font-bold cursor-pointer"
+                    >
+                      <Play class="w-3.5 h-3.5 fill-current" />
+                      <span>Bắt đầu làm</span>
+                    </button>
+                  </template>
+                  <template v-else>
+                    <span class="text-[10px] text-slate-400 italic px-2">Đang đếm giờ task khác...</span>
+                  </template>
+                </div>
+              </div>
 
               <!-- Progress bar logs vs estimation -->
               <div class="space-y-1">
@@ -402,6 +432,50 @@
                 </button>
               </form>
             </div>
+
+            <!-- Blocked By (Dependencies) -->
+            <div class="space-y-2">
+              <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Công việc ràng buộc (Blocked by)</h4>
+              <div v-if="!isViewer" class="relative">
+                <select
+                  v-model="newBlockerId"
+                  @change="addBlocker"
+                  class="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl focus:ring-indigo-500 focus:border-indigo-500 p-2 cursor-pointer transition-colors"
+                >
+                  <option value="" disabled selected>Thêm ràng buộc...</option>
+                  <option v-for="task in availableTasksToBlock" :key="task.id" :value="task.id">
+                    {{ task.title }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- List of Blockers -->
+              <div v-if="localTask?.blockedBy && localTask.blockedBy.length > 0" class="flex flex-wrap gap-2 mt-2">
+                <div
+                  v-for="blockerId in localTask.blockedBy"
+                  :key="blockerId"
+                  class="flex items-center bg-rose-50 border border-rose-200 text-rose-700 px-2 py-1 rounded-lg shadow-sm group"
+                >
+                  <div class="flex items-center space-x-1.5">
+                    <Lock class="w-3 h-3 text-rose-500" />
+                    <span class="text-xs font-bold max-w-[120px] truncate" :title="getTaskTitle(blockerId)">
+                      {{ getTaskTitle(blockerId) }}
+                    </span>
+                  </div>
+                  <button
+                    v-if="!isViewer"
+                    @click="removeBlocker(blockerId)"
+                    class="ml-1.5 p-0.5 rounded hover:bg-rose-200 text-rose-500 hover:text-rose-700 transition-colors"
+                    title="Xóa ràng buộc"
+                  >
+                    <X class="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+              <div v-else class="text-[10px] text-slate-400 italic px-1">
+                Không bị ràng buộc bởi công việc nào.
+              </div>
+            </div>
           </div>
 
           <!-- Comments Section -->
@@ -412,100 +486,77 @@
             </h4>
 
             <!-- Comments List -->
-            <div v-if="commentsList.length > 0" class="space-y-3">
-              <div v-for="comment in commentsList" :key="comment.id" class="flex items-start space-x-3 p-3 bg-slate-50/50 rounded-xl border border-slate-100/50">
-                <img :src="comment.userAvatar" alt="Avatar" class="w-8 h-8 rounded-full" />
-                <div class="flex-1 space-y-1">
-                  <div class="flex items-center justify-between">
-                    <span class="text-xs font-bold text-slate-800">{{ comment.userName }}</span>
-                    <div class="flex items-center space-x-2">
-                      <span class="text-[10px] text-slate-400">
-                        {{ formatCommentDate(comment.updatedAt || comment.createdAt) }}
-                        <span v-if="comment.updatedAt">(đã sửa)</span>
-                      </span>
-                      <div v-if="canManageComment(comment)" class="flex items-center space-x-0.5">
-                        <button
-                          v-if="editingCommentId !== comment.id"
-                          type="button"
-                          @click="startEditComment(comment)"
-                          class="p-1 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-md transition-colors"
-                          title="Sửa bình luận"
-                        >
-                          <Pencil class="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          @click="removeComment(comment.id)"
-                          class="p-1 text-slate-400 hover:text-rose-600 hover:bg-white rounded-md transition-colors"
-                          title="Xóa bình luận"
-                        >
-                          <Trash2 class="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
+            <div class="space-y-4">
+              <div v-for="comment in (localTask?.comments || [])" :key="comment.id" class="flex space-x-3">
+                <img :src="comment.userAvatar" alt="User Avatar" class="w-8 h-8 rounded-full shadow-sm ring-2 ring-slate-100/50" />
+                <div class="flex-1 bg-slate-50 border border-slate-100 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm hover:shadow-md transition-shadow group relative">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="font-bold text-slate-800 text-xs">{{ comment.userName }}</span>
+                    <span class="text-[10px] font-medium text-slate-400">{{ formatCommentDate(comment.createdAt) }}</span>
                   </div>
-                  <div v-if="editingCommentId === comment.id" class="space-y-2">
-                    <textarea
-                      v-model="editingCommentText"
-                      rows="2"
-                      class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-700 focus:outline-none focus:border-indigo-500 resize-none"
-                    ></textarea>
-                    <div class="flex justify-end space-x-2">
-                      <button
-                        type="button"
-                        @click="cancelEditComment"
-                        class="px-2.5 py-1.5 text-[10px] font-bold text-slate-500 hover:text-slate-700 hover:bg-white rounded-lg transition-colors"
-                      >
-                        Hủy
-                      </button>
-                      <button
-                        type="button"
-                        @click="saveComment(comment.id)"
-                        class="px-2.5 py-1.5 text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors flex items-center space-x-1"
-                      >
-                        <Check class="w-3 h-3" />
-                        <span>Lưu</span>
-                      </button>
-                    </div>
-                  </div>
-                  <p v-else class="text-xs text-slate-600 leading-relaxed break-words">{{ comment.content }}</p>
+                  <p class="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap" v-html="formatCommentContent(comment.content)"></p>
+                  
+                  <button
+                    v-if="!isViewer && canManageComment(comment)"
+                    @click="taskStore.deleteComment(localTask?.id || '', comment.id)"
+                    class="absolute top-2 right-2 p-1.5 bg-rose-50 text-rose-500 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-rose-100 transition-all shadow-sm"
+                  >
+                    <Trash2 class="w-3 h-3" />
+                  </button>
                 </div>
               </div>
             </div>
-            <div v-else class="text-xs text-slate-400 italic text-center py-4 bg-slate-50/30 rounded-xl border border-dashed border-slate-200">
-              Chưa có bình luận nào. Hãy gửi phản hồi đầu tiên của bạn!
-            </div>
 
-            <!-- New Comment Form -->
-            <form v-if="!isViewer" @submit.prevent="submitComment" class="flex space-x-3 items-center pt-2">
-              <img :src="taskStore.currentUser.avatarUrl || 'https://ui-avatars.com/api/?name=User&background=cbd5e1&color=fff'" alt="My avatar" class="w-8 h-8 rounded-full animate-pulse" />
-              <div class="flex-1 relative">
-                <input
-                  v-model="newCommentText"
-                  id="detail_comment"
-                  type="text"
-                  placeholder=" "
-                  required
-                  class="peer w-full pl-4 pr-12 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-slate-800 text-xs focus:outline-none focus:border-indigo-500 focus:bg-white transition-all font-semibold"
-                />
-                <label
-                  for="detail_comment"
-                  class="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-slate-400 pointer-events-none transition-all duration-200 ease-out 
-                         peer-placeholder-shown:top-1/2 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:text-xs 
-                         peer-focus:top-0 peer-focus:-translate-y-1/2 peer-focus:text-[10px] peer-focus:text-indigo-500 peer-focus:px-1.5 peer-focus:bg-white
-                         peer-[:not(:placeholder-shown)]:top-0 peer-[:not(:placeholder-shown)]:-translate-y-1/2 peer-[:not(:placeholder-shown)]:text-[10px] peer-[:not(:placeholder-shown)]:px-1.5 peer-[:not(:placeholder-shown)]:bg-white"
-                >
-                  Viết bình luận thảo luận...
-                </label>
+            <!-- Comment Input -->
+            <div v-if="!isViewer" class="relative mt-2">
+              <textarea
+                v-model="newCommentText"
+                rows="2"
+                placeholder="Viết bình luận của bạn..."
+                class="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-2xl focus:ring-indigo-500 focus:border-indigo-500 p-3 pr-10 resize-none transition-colors"
+                @keydown.enter.prevent="submitComment"
+              ></textarea>
+              
+              <!-- Mention Control Actions -->
+              <div class="flex items-center justify-between mt-1">
+                <!-- Mention Dropdown -->
+                <div class="relative">
+                  <button
+                    @click="isMentionMenuOpen = !isMentionMenuOpen"
+                    class="flex items-center space-x-1 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors text-[10px] font-bold"
+                  >
+                    <AtSign class="w-3 h-3" />
+                    <span>Tag thành viên</span>
+                  </button>
+                  
+                  <!-- Mention Users Menu -->
+                  <div
+                    v-if="isMentionMenuOpen"
+                    class="absolute bottom-full left-0 mb-1 w-48 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden"
+                  >
+                    <div class="max-h-40 overflow-y-auto">
+                      <div
+                        v-for="user in mentionableUsers"
+                        :key="user.id"
+                        @click="insertMention(user.fullName)"
+                        class="flex items-center space-x-2 px-3 py-2 hover:bg-indigo-50 cursor-pointer transition-colors"
+                      >
+                        <img :src="user.avatarUrl" class="w-5 h-5 rounded-full" />
+                        <span class="text-xs font-bold text-slate-700">{{ user.fullName }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <button
-                  type="submit"
-                  @mousedown="handleButtonClick"
-                  class="absolute right-2.5 top-1/2 -translate-y-1/2 text-indigo-600 hover:text-indigo-800 p-1.5 rounded-lg transition-all relative overflow-hidden"
+                  @click="submitComment"
+                  class="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 active:translate-y-0"
+                  :disabled="!newCommentText.trim()"
                 >
-                  <Send class="w-4 h-4 relative z-10" />
+                  <Send class="w-4 h-4" />
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
 
@@ -537,7 +588,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
-import { X, MessageSquare, Send, Trash2, CheckSquare, Clock, Plus, Pencil, Check } from '@lucide/vue';
+import { X, MessageSquare, Send, Trash2, CheckSquare, Clock, Plus, Play, Square, Lock, AtSign } from '@lucide/vue';
 import { useTaskStore } from '../stores/taskStore';
 
 // Sóng nước ripple cho các nút bấm trong modal chi tiết
@@ -760,11 +811,66 @@ function submitWorkLog() {
   }
 }
 
+// Timer helpers
+function formatTime(totalSeconds: number) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function handleStopTimer() {
+  const result = taskStore.stopTimer();
+  if (result.taskId === localTask.value?.id) {
+    newLogHours.value = result.hours;
+    newLogDescription.value = 'Đã hoàn thành phiên làm việc (Pomodoro)';
+    // Highlight or scroll to form could be done here
+  }
+}
+
 // Comments actions
+const isMentionMenuOpen = ref(false);
+const mentionableUsers = computed(() => taskStore.users);
+
+function insertMention(fullName: string) {
+  const formattedName = fullName.replace(/\s+/g, '_');
+  newCommentText.value += `@${formattedName} `;
+  isMentionMenuOpen.value = false;
+}
+
+function formatCommentContent(text: string) {
+  if (!text) return '';
+  // Convert @Name_Surname to bold colored span
+  return text.replace(/@(\S+)/g, (match, _name) => {
+    return `<span class="text-indigo-600 font-extrabold bg-indigo-50 px-1 rounded cursor-pointer hover:underline">${match}</span>`;
+  });
+}
+
 async function submitComment() {
   if (localTask.value && newCommentText.value.trim()) {
-    await taskStore.addComment(localTask.value.id, newCommentText.value.trim());
+    const rawText = newCommentText.value;
+    await taskStore.addComment(localTask.value.id, rawText.trim());
+    
+    // Check for mentions and trigger notifications
+    const mentions = rawText.match(/@(\S+)/g);
+    if (mentions) {
+      mentions.forEach(mention => {
+        // e.g. @Ngọc_Bảo -> Ngọc Bảo
+        const nameToFind = mention.substring(1).replace(/_/g, ' ').toLowerCase();
+        const taggedUser = taskStore.users.find(u => u.fullName.toLowerCase() === nameToFind);
+        if (taggedUser && taggedUser.id !== taskStore.currentUser.id) {
+          taskStore.notifyUser(taggedUser.id, 'Bạn được nhắc đến!', `${taskStore.currentUser.fullName} đã nhắc đến bạn trong task "${localTask.value?.title}".`, localTask.value?.id);
+        }
+      });
+    }
+
     newCommentText.value = '';
+    
+    // Re-fetch or sync comments natively
+    const task = taskStore.tasks.find(t => t.id === localTask.value?.id);
+    if (task && localTask.value) {
+      localTask.value.comments = [...(task.comments || [])];
+    }
   }
 }
 
@@ -772,31 +878,6 @@ function canManageComment(comment: Comment) {
   if (isManager.value) return true;
   const currentUser = taskStore.currentUser;
   return comment.userId === currentUser.id || (!comment.userId && comment.userName === currentUser.fullName);
-}
-
-function startEditComment(comment: Comment) {
-  editingCommentId.value = comment.id;
-  editingCommentText.value = comment.content;
-}
-
-function cancelEditComment() {
-  editingCommentId.value = null;
-  editingCommentText.value = '';
-}
-
-async function saveComment(commentId: string) {
-  if (!localTask.value || !editingCommentText.value.trim()) return;
-  await taskStore.updateComment(localTask.value.id, commentId, editingCommentText.value.trim());
-  cancelEditComment();
-}
-
-async function removeComment(commentId: string) {
-  if (!localTask.value) return;
-  if (!confirm('Bạn có chắc chắn muốn xóa bình luận này?')) return;
-  await taskStore.deleteComment(localTask.value.id, commentId);
-  if (editingCommentId.value === commentId) {
-    cancelEditComment();
-  }
 }
 
 function formatCommentDate(dateStr: string) {
@@ -817,6 +898,41 @@ function triggerDelete() {
 
 function close() {
   emit('close');
+}
+
+// --- Task Dependencies (Blocked By) ---
+const newBlockerId = ref('');
+
+const availableTasksToBlock = computed(() => {
+  if (!localTask.value) return [];
+  // Can block by any task in the same project, EXCEPT itself, and EXCEPT those already blocking it
+  return taskStore.tasks.filter(t => 
+    t.projectId === localTask.value?.projectId &&
+    t.id !== localTask.value?.id &&
+    !(localTask.value?.blockedBy || []).includes(t.id)
+  );
+});
+
+function getTaskTitle(taskId: string) {
+  const t = taskStore.tasks.find(x => x.id === taskId);
+  return t ? t.title : 'Unknown Task';
+}
+
+function addBlocker() {
+  if (newBlockerId.value && localTask.value) {
+    const updatedBlockedBy = [...(localTask.value.blockedBy || []), newBlockerId.value];
+    taskStore.updateBlockedBy(localTask.value.id, updatedBlockedBy);
+    localTask.value.blockedBy = updatedBlockedBy;
+    newBlockerId.value = ''; // Reset select
+  }
+}
+
+function removeBlocker(blockerId: string) {
+  if (localTask.value) {
+    const updatedBlockedBy = (localTask.value.blockedBy || []).filter(id => id !== blockerId);
+    taskStore.updateBlockedBy(localTask.value.id, updatedBlockedBy);
+    localTask.value.blockedBy = updatedBlockedBy;
+  }
 }
 </script>
 

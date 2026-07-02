@@ -21,16 +21,50 @@
       </div>
 
       <div class="flex items-center space-x-3">
+        <!-- Assignee Filter -->
+        <div class="relative flex items-center space-x-2">
+          <select
+            v-model="filterAssigneeId"
+            class="px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl text-xs text-slate-700 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white transition-all cursor-pointer w-28"
+          >
+            <option value="all">Người làm</option>
+            <option v-for="user in taskStore.users" :key="user.id" :value="user.id">
+              {{ user.fullName.split(' ').slice(-2).join(' ') }}
+            </option>
+          </select>
+        </div>
+
+        <!-- Priority Filter -->
+        <div class="relative flex items-center space-x-2">
+          <select
+            v-model="filterPriority"
+            class="px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl text-xs text-slate-700 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white transition-all cursor-pointer w-24"
+          >
+            <option value="all">Ưu tiên</option>
+            <option value="High">Cao</option>
+            <option value="Medium">Trung bình</option>
+            <option value="Low">Thấp</option>
+          </select>
+        </div>
+
         <!-- Search bar stub inside Kanban -->
-        <div class="relative w-64">
+        <div class="relative w-48">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-3.5 h-3.5" />
           <input
             v-model="searchQuery"
             type="text"
-            placeholder="Tìm nhanh công việc..."
+            placeholder="Tìm nhanh..."
             class="w-full pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-50 rounded-xl text-[11px] text-slate-700 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
           />
         </div>
+
+        <button
+          @click="isWorkloadModalOpen = true"
+          class="flex items-center space-x-1.5 bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 text-slate-600 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-sm transition-all duration-200"
+        >
+          <BarChart2 class="w-4 h-4" />
+          <span>Thống kê</span>
+        </button>
 
         <button
           v-if="isManager"
@@ -188,18 +222,26 @@
       :taskId="activeTaskId"
       @close="isDetailModalOpen = false"
     />
+    <WorkloadModal 
+      :isOpen="isWorkloadModalOpen"
+      @close="isWorkloadModalOpen = false"
+    />
+    
+    <GlobalTimerWidget @open-task="openTaskDetails" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { Search, Plus } from '@lucide/vue';
+import { Search, Plus, BarChart2 } from '@lucide/vue';
 import { useTaskStore } from '../stores/taskStore';
 import type { Task } from '../services/mockData';
 import TaskCard from '../components/TaskCard.vue';
 
 import QuickTaskModal from '../components/QuickTaskModal.vue';
 import TaskDetailModal from '../components/TaskDetailModal.vue';
+import WorkloadModal from '../components/WorkloadModal.vue';
+import GlobalTimerWidget from '../components/GlobalTimerWidget.vue';
 
 const taskStore = useTaskStore();
 
@@ -257,9 +299,12 @@ function handleButtonClick(event: MouseEvent) {
 
 // UI States
 const selectedProjectId = ref('all');
+const filterAssigneeId = ref('all');
+const filterPriority = ref('all');
 const searchQuery = ref('');
 const isCreateModalOpen = ref(false);
 const isDetailModalOpen = ref(false);
+const isWorkloadModalOpen = ref(false);
 const activeTaskId = ref<string | undefined>(undefined);
 const dragOverColumn = ref<Task['status'] | null>(null);
 const activeTab = ref<Task['status'] | 'all'>('all');
@@ -303,6 +348,16 @@ function getTasksByStatus(status: Task['status']) {
   // Project Filter
   if (selectedProjectId.value !== 'all') {
     filtered = filtered.filter(t => t.projectId === selectedProjectId.value);
+  }
+
+  // Assignee Filter
+  if (filterAssigneeId.value !== 'all') {
+    filtered = filtered.filter(t => t.assigneeId?.includes(filterAssigneeId.value));
+  }
+
+  // Priority Filter
+  if (filterPriority.value !== 'all') {
+    filtered = filtered.filter(t => t.priority === filterPriority.value);
   }
 
   // Text search filter

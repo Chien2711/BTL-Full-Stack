@@ -21,6 +21,49 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options => options.TokenValidationParameters = TokenValidation(jwtSecret, issuer, audience));
 builder.Services.AddAuthorization();
 
+builder.Services.AddHostedService(sp => new DelegateBackgroundService(async stoppingToken =>
+{
+    while (!stoppingToken.IsCancellationRequested)
+    {
+        try
+        {
+            var configuration = sp.GetRequiredService<IConfiguration>();
+            var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+            var localDb = new SqlDb(configuration.GetConnectionString("TaskDb")!);
+            await using var conn = await localDb.OpenAsync();
+            
+            var tomorrowStr = DateTimeOffset.UtcNow.AddDays(1).ToString("yyyy-MM-dd");
+            var tasksToEscalate = await QueryAsync<TaskRow>(conn, 
+                "SELECT * FROM Tasks WHERE dueDate <= @tomorrow AND status != 'Done' AND priority != 'High'",
+                P("@tomorrow", tomorrowStr));
+                
+            foreach (var task in tasksToEscalate)
+            {
+                await ExecuteAsync(conn, "UPDATE Tasks SET priority = 'High' WHERE id = @id", P("@id", task.Id));
+                
+                var recipientIds = SplitIds(task.AssigneeId).Append(task.CreatorId).Distinct().ToList();
+                if (recipientIds.Any())
+                {
+                    await PublishTaskEventAsync(httpClientFactory, new TaskEventRequest(
+                        "task.urgency.escalated",
+                        "Công việc sắp quá hạn!",
+                        $"Công việc \"{task.Title}\" sắp đến hạn chót ({task.DueDate}) và đã được tự động chuyển lên mức độ ưu tiên Cao.",
+                        task.Id,
+                        task.ProjectId,
+                        recipientIds,
+                        new UserDto("system", "Hệ thống tự động", "Admin")
+                    ));
+                }
+            }
+        }
+        catch
+        {
+            // Ignore for background task to keep running
+        }
+        await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+    }
+}));
+
 var app = builder.Build();
 app.UseCors();
 app.UseSwagger();
@@ -354,3 +397,8 @@ record SubTaskClientDto(string Id, string Title, bool IsCompleted);
 record WorkLogDto(string Id, string TaskId, string UserName, double Hours, string Description, string CreatedAt);
 record WorkLogClientDto(string Id, string UserName, double Hours, string Description, string CreatedAt);
 record TaskEventRequest(string Type, string Title, string Message, string? TaskId, string? ProjectId, List<string> RecipientUserIds, UserDto? Actor);
+
+class DelegateBackgroundService(Func<CancellationToken, Task> action) : BackgroundService
+{
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => action(stoppingToken);
+}

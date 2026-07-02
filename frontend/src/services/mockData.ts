@@ -82,6 +82,7 @@ export interface Task {
   creatorId: string;
   createdAt: string;
   labels?: string[]; // E.g., 'Lập trình', 'Thiết kế', 'Kiểm thử', 'Tài liệu'
+  blockedBy?: string[]; // Array of task IDs that must be 'Done' before this task can be started
   subTasks?: SubTask[];
   estimatedHours?: number;
   loggedHours?: number;
