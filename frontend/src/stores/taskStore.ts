@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { type Task, type Project, type User, type Notification, type PublishedEvent, type ActivityLog } from '../services/mockData';
+import { type Task, type Project, type User, type Notification, type PublishedEvent, type ActivityLog, type Sprint, type AttendanceRecord } from '../services/mockData';
 import { apiService } from '../services/api';
 
 export const useTaskStore = defineStore('taskStore', () => {
@@ -10,6 +10,7 @@ export const useTaskStore = defineStore('taskStore', () => {
   const notifications = ref<Notification[]>([]);
   const activityLogs = ref<ActivityLog[]>([]);
   const currentUser = ref<User>({} as User);
+  const sprints = ref<Sprint[]>([]);
   
   // Event Hub states
   const events = ref<PublishedEvent[]>([]);
@@ -402,18 +403,22 @@ export const useTaskStore = defineStore('taskStore', () => {
     }
   }
 
-  async function updateProjectMembers(projectId: string, memberIds: string[]) {
+  async function updateProjectMembers(projectId: string, memberRoles: { userId: string; role: string; hourlyRate: number }[]) {
     try {
-      await apiService.updateProjectMembers(projectId, memberIds);
+      await apiService.updateProjectMembers(projectId, memberRoles);
       const proj = projects.value.find(p => p.id === projectId);
       if (proj) {
-        proj.members = users.value.filter(u => memberIds.includes(u.id)).map(u => ({
-          id: u.id,
-          fullName: u.fullName,
-          avatarUrl: u.avatarUrl,
-          role: u.role,
-          isOnline: u.isOnline
-        }));
+        proj.members = memberRoles.map(m => {
+          const u = users.value.find(user => user.id === m.userId);
+          return {
+            id: m.userId,
+            fullName: u?.fullName || m.userId,
+            avatarUrl: u?.avatarUrl || '',
+            role: m.role,
+            isOnline: u?.isOnline || false,
+            hourlyRate: m.hourlyRate
+          };
+        });
       }
     } catch (error) {
       console.error('Failed to update project members:', error);
@@ -493,6 +498,68 @@ export const useTaskStore = defineStore('taskStore', () => {
     }
   }
 
+  // Sprints
+  async function refreshProjectSprints(projectId: string) {
+    try {
+      sprints.value = await apiService.getSprints(projectId);
+    } catch (error) {
+      console.error('Failed to load project sprints:', error);
+      sprints.value = [];
+    }
+  }
+
+  async function addSprint(projectId: string, sprintData: Omit<Sprint, 'id' | 'projectId'>) {
+    try {
+      const newSprint = await apiService.createSprint(projectId, sprintData);
+      sprints.value.push(newSprint);
+      return newSprint;
+    } catch (error) {
+      console.error('Failed to add sprint:', error);
+      throw error;
+    }
+  }
+
+  // Attendance
+  async function getAttendance(projectId: string, date: string): Promise<AttendanceRecord[]> {
+    try {
+      return await apiService.getAttendance(projectId, date);
+    } catch (error) {
+      console.error('Failed to get attendance:', error);
+      return [];
+    }
+  }
+
+  async function saveAttendance(projectId: string, date: string, records: Omit<AttendanceRecord, 'id' | 'projectId' | 'date'>[]): Promise<void> {
+    try {
+      await apiService.saveAttendance(projectId, date, records);
+    } catch (error) {
+      console.error('Failed to save attendance:', error);
+      throw error;
+    }
+  }
+
+  async function getAllProjectAttendance(projectId: string): Promise<AttendanceRecord[]> {
+    try {
+      return await apiService.getAllProjectAttendance(projectId);
+    } catch (error) {
+      console.error('Failed to get all project attendance:', error);
+      return [];
+    }
+  }
+
+  async function updateProject(projectId: string, projectData: Omit<Project, 'id' | 'createdAt' | 'progress' | 'members'>): Promise<void> {
+    try {
+      await apiService.updateProject(projectId, projectData);
+      const p = projects.value.find(proj => proj.id === projectId);
+      if (p) {
+        Object.assign(p, projectData);
+      }
+    } catch (error) {
+      console.error('Failed to update project:', error);
+      throw error;
+    }
+  }
+
   return {
     users,
     projects,
@@ -525,6 +592,7 @@ export const useTaskStore = defineStore('taskStore', () => {
     refreshActivityLogs,
     createSelfNotification,
     addProject,
+    updateProject,
     updateProjectMembers,
     updateUserRole,
     updateProfile,
@@ -535,6 +603,16 @@ export const useTaskStore = defineStore('taskStore', () => {
     toggleSubTask,
     deleteSubTask,
     addWorkLog,
+
+    // Sprints
+    sprints,
+    refreshProjectSprints,
+    addSprint,
+
+    // Attendance
+    getAttendance,
+    saveAttendance,
+    getAllProjectAttendance,
 
     // Auth
     loginAction,

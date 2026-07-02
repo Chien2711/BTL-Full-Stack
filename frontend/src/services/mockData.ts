@@ -5,6 +5,7 @@ export interface User {
   role: string;
   isOnline: boolean;
   email?: string;
+  hourlyRate?: number;
 }
 
 export interface Project {
@@ -17,6 +18,9 @@ export interface Project {
   members: User[];
   color: string; // Tailwind color name like 'indigo', 'amber', 'emerald', 'rose'
   createdAt: string;
+  budget: number;
+  startDate: string;
+  endDate: string;
 }
 
 export interface Comment {
@@ -98,13 +102,134 @@ export interface PublishedEvent {
   timestamp: string;
 }
 
-export const defaultUsers: User[] = [];
+export interface Sprint {
+  id: string;
+  projectId: string;
+  name: string;
+  goal: string;
+  startDate: string;
+  endDate: string;
+}
 
-export const defaultProjects: Project[] = [];
+export interface AttendanceRecord {
+  id: string;
+  projectId: string;
+  date: string;
+  userId: string;
+  status: 'Present' | 'Absent';
+  overtimeHours: number;
+  notes: string;
+}
 
-export const defaultTasks: Task[] = [];
+export const defaultUsers: User[] = [
+  {
+    id: 'u1',
+    fullName: 'Chien2711 (Group 1 Lead)',
+    avatarUrl: 'https://ui-avatars.com/api/?name=Chien+2711&background=6366f1&color=fff',
+    role: 'Admin',
+    isOnline: true,
+    email: 'admin@projecthub.com',
+    hourlyRate: 50
+  },
+  {
+    id: 'u2',
+    fullName: 'Ngọc Bảo (Group 2 Lead)',
+    avatarUrl: 'https://ui-avatars.com/api/?name=Ngoc+Bao&background=3b82f6&color=fff',
+    role: 'Member',
+    isOnline: true,
+    email: 'nhanvien1@projecthub.com',
+    hourlyRate: 40
+  },
+  {
+    id: 'u3',
+    fullName: 'Tuấn (Group 3 Lead)',
+    avatarUrl: 'https://ui-avatars.com/api/?name=Tuan&background=10b981&color=fff',
+    role: 'Member',
+    isOnline: false,
+    email: 'viewer@projecthub.com',
+    hourlyRate: 30
+  }
+];
 
-export const defaultNotifications: Notification[] = [];
+export const defaultProjects: Project[] = [
+  {
+    id: 'p1',
+    name: 'SprintFlow Microservices',
+    description: 'Hệ thống quản lý dự án và phân công công việc theo mô hình Kanban/Scrum.',
+    status: 'Active',
+    statusText: 'Đang hoạt động',
+    progress: 40,
+    members: [
+      { id: 'u1', fullName: 'Chien2711 (Group 1 Lead)', avatarUrl: 'https://ui-avatars.com/api/?name=Chien+2711&background=6366f1&color=fff', role: 'Admin', isOnline: true, hourlyRate: 50 },
+      { id: 'u2', fullName: 'Ngọc Bảo (Group 2 Lead)', avatarUrl: 'https://ui-avatars.com/api/?name=Ngoc+Bao&background=3b82f6&color=fff', role: 'Member', isOnline: true, hourlyRate: 40 },
+      { id: 'u3', fullName: 'Tuấn (Group 3 Lead)', avatarUrl: 'https://ui-avatars.com/api/?name=Tuan&background=10b981&color=fff', role: 'Member', isOnline: false, hourlyRate: 30 }
+    ],
+    color: 'indigo',
+    createdAt: '2026-07-01',
+    budget: 5000,
+    startDate: '2026-07-01',
+    endDate: '2026-12-31'
+  },
+  {
+    id: 'p2',
+    name: 'Legacy Migration',
+    description: 'Chuyển đổi hệ thống từ Monolith sang Microservices.',
+    status: 'New',
+    statusText: 'Mới tạo',
+    progress: 0,
+    members: [
+      { id: 'u1', fullName: 'Chien2711 (Group 1 Lead)', avatarUrl: 'https://ui-avatars.com/api/?name=Chien+2711&background=6366f1&color=fff', role: 'Admin', isOnline: true, hourlyRate: 50 }
+    ],
+    color: 'amber',
+    createdAt: '2026-07-02',
+    budget: 2500,
+    startDate: '2026-07-02',
+    endDate: '2026-09-02'
+  }
+];
+
+export const defaultTasks: Task[] = [
+  {
+    id: 't1',
+    title: 'Thiết kế cơ sở dữ liệu ProjectDB',
+    description: 'Tạo các bảng cho Project và Member trong ProjectService.',
+    status: 'Done',
+    priority: 'High',
+    dueDate: '2026-07-05',
+    projectId: 'p1',
+    assigneeId: 'u1',
+    creatorId: 'u1',
+    createdAt: '2026-07-01',
+    labels: ['Lập trình', 'Cơ sở dữ liệu'],
+    loggedHours: 12
+  },
+  {
+    id: 't2',
+    title: 'Xây dựng giao diện Kanban Board',
+    description: 'Thiết kế giao diện kéo thả các cột công việc.',
+    status: 'InProgress',
+    priority: 'Medium',
+    dueDate: '2026-07-10',
+    projectId: 'p1',
+    assigneeId: 'u2',
+    creatorId: 'u1',
+    createdAt: '2026-07-01',
+    labels: ['Giao diện'],
+    loggedHours: 20
+  }
+];
+
+export const defaultNotifications: Notification[] = [
+  {
+    id: 'n1',
+    userId: 'u1',
+    title: 'Chào mừng bạn!',
+    message: 'Chào mừng bạn đến với hệ thống quản lý công việc SprintFlow.',
+    type: 'system',
+    isRead: false,
+    createdAt: new Date().toISOString()
+  }
+];
 
 export const mockStorage = {
   getUsers(): User[] {
@@ -160,6 +285,32 @@ export const mockStorage = {
   },
 
   getCurrentUser(): User {
-    return this.getUsers()[0]; // Logged in user is 'Việt Nguyễn' by default
+    return this.getUsers()[0]; // Logged in user is 'Chien2711' by default
+  },
+
+  getSprints(): Sprint[] {
+    const data = localStorage.getItem('ph_sprints');
+    if (!data) {
+      localStorage.setItem('ph_sprints', JSON.stringify([]));
+      return [];
+    }
+    return JSON.parse(data);
+  },
+
+  saveSprints(sprints: Sprint[]) {
+    localStorage.setItem('ph_sprints', JSON.stringify(sprints));
+  },
+
+  getAttendance(): AttendanceRecord[] {
+    const data = localStorage.getItem('ph_attendance');
+    if (!data) {
+      localStorage.setItem('ph_attendance', JSON.stringify([]));
+      return [];
+    }
+    return JSON.parse(data);
+  },
+
+  saveAttendance(records: AttendanceRecord[]) {
+    localStorage.setItem('ph_attendance', JSON.stringify(records));
   }
 };

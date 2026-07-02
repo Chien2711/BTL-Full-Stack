@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { mockStorage, type User, type Project, type Task, type Comment, type SubTask, type WorkLog, type Notification, type ActivityLog } from './mockData';
+import { mockStorage, type User, type Project, type Task, type Comment, type SubTask, type WorkLog, type Notification, type ActivityLog, type Sprint, type AttendanceRecord } from './mockData';
 
 const browserHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || `http://${browserHost}:7000/api`;
@@ -25,7 +25,7 @@ apiClient.interceptors.request.use((config) => {
 });
 
 // Cờ cấu hình: bật true để chạy thử bằng LocalStorage, tắt false để kết nối Backend thật
-const USE_MOCK = false;
+const USE_MOCK = true;
 
 export const apiService = {
   // --- USER API ---
@@ -392,19 +392,23 @@ export const apiService = {
     return response.data;
   },
 
-  async updateProjectMembers(projectId: string, members: string[]): Promise<void> {
+  async updateProjectMembers(projectId: string, members: { userId: string; role: string; hourlyRate: number }[]): Promise<void> {
     if (USE_MOCK) {
       const projs = mockStorage.getProjects();
       const p = projs.find(proj => proj.id === projectId);
       if (p) {
         const users = mockStorage.getUsers();
-        p.members = users.filter(u => members.includes(u.id)).map(u => ({
-          id: u.id,
-          fullName: u.fullName,
-          avatarUrl: u.avatarUrl,
-          role: u.role,
-          isOnline: u.isOnline
-        }));
+        p.members = members.map(m => {
+          const u = users.find(user => user.id === m.userId);
+          return {
+            id: m.userId,
+            fullName: u?.fullName || m.userId,
+            avatarUrl: u?.avatarUrl || '',
+            role: m.role,
+            isOnline: u?.isOnline || false,
+            hourlyRate: m.hourlyRate
+          };
+        });
         mockStorage.saveProjects(projs);
       }
       return Promise.resolve();
@@ -466,5 +470,75 @@ export const apiService = {
     }
     const response = await apiClient.post('/auth/register', userData);
     return response.data;
+  },
+
+  // --- SPRINT API ---
+  async getSprints(projectId: string): Promise<Sprint[]> {
+    if (USE_MOCK) {
+      return Promise.resolve(mockStorage.getSprints().filter(s => s.projectId === projectId));
+    }
+    const response = await apiClient.get<Sprint[]>(`/projects/${projectId}/sprints`);
+    return response.data;
+  },
+
+  async createSprint(projectId: string, sprintData: Omit<Sprint, 'id' | 'projectId'>): Promise<Sprint> {
+    if (USE_MOCK) {
+      const newSprint: Sprint = {
+        ...sprintData,
+        id: 'sp_' + Date.now(),
+        projectId
+      };
+      const sprints = mockStorage.getSprints();
+      sprints.push(newSprint);
+      mockStorage.saveSprints(sprints);
+      return Promise.resolve(newSprint);
+    }
+    const response = await apiClient.post<Sprint>(`/projects/${projectId}/sprints`, sprintData);
+    return response.data;
+  },
+
+  async getAttendance(projectId: string, date: string): Promise<AttendanceRecord[]> {
+    if (USE_MOCK) {
+      return Promise.resolve(mockStorage.getAttendance().filter(a => a.projectId === projectId && a.date === date));
+    }
+    const response = await apiClient.get<AttendanceRecord[]>(`/projects/${projectId}/attendance`, { params: { date } });
+    return response.data;
+  },
+
+  async saveAttendance(projectId: string, date: string, records: Omit<AttendanceRecord, 'id' | 'projectId' | 'date'>[]): Promise<void> {
+    if (USE_MOCK) {
+      const allAttendance = mockStorage.getAttendance().filter(a => !(a.projectId === projectId && a.date === date));
+      const newRecords: AttendanceRecord[] = records.map((r, index) => ({
+        ...r,
+        id: `att_${Date.now()}_${index}`,
+        projectId,
+        date
+      }));
+      allAttendance.push(...newRecords);
+      mockStorage.saveAttendance(allAttendance);
+      return Promise.resolve();
+    }
+    await apiClient.post(`/projects/${projectId}/attendance`, { date, records });
+  },
+
+  async getAllProjectAttendance(projectId: string): Promise<AttendanceRecord[]> {
+    if (USE_MOCK) {
+      return Promise.resolve(mockStorage.getAttendance().filter(a => a.projectId === projectId));
+    }
+    const response = await apiClient.get<AttendanceRecord[]>(`/projects/${projectId}/attendance/all`);
+    return response.data;
+  },
+
+  async updateProject(projectId: string, projectData: Omit<Project, 'id' | 'createdAt' | 'progress' | 'members'>): Promise<void> {
+    if (USE_MOCK) {
+      const projs = mockStorage.getProjects();
+      const p = projs.find(proj => proj.id === projectId);
+      if (p) {
+        Object.assign(p, projectData);
+        mockStorage.saveProjects(projs);
+      }
+      return Promise.resolve();
+    }
+    await apiClient.put(`/projects/${projectId}`, projectData);
   }
 };
